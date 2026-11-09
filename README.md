@@ -11,11 +11,23 @@ The focus is on feeling like the original NC, with fast drive switching: press `
 - ProDOS 8 (tested with 1.9 and 2.4)
 
 ## Download
-- [`release/YANC.po`](release/YANC.po) – 140K ProDOS disk image with `YANC.SYSTEM` (not bootable – copy `PRODOS` onto it, or run `YANC.SYSTEM` from your own boot disk)
+- [`release/YANC.po`](release/YANC.po) – 140K ProDOS disk image containing `YANC.SYSTEM`
 - [`release/YANC.SYSTEM`](release/YANC.SYSTEM) – the program itself (ProDOS type `SYS` / `$FF`, aux type `$2000`)
 
-To start YANC at boot, it must be the first `*.SYSTEM` file in the volume directory –
-or simply select it in YANC and press `4` then `B`.
+> **Note: `YANC.po` is not a bootable disk.** It holds only `YANC.SYSTEM` – there is no `PRODOS` file on it
+> (ProDOS is Apple's software and is not redistributed here).
+> Copy `YANC.SYSTEM` to a disk or hard drive that already boots ProDOS, then run it from there.
+
+## Getting started
+1. Boot any ProDOS 8 disk (ProDOS 2.4.x from [prodos8.com](https://prodos8.com) is recommended).
+2. Copy `YANC.SYSTEM` from `YANC.po` to your boot disk or hard drive – for example with Copy II Plus,
+   ProDOS Filer, or [CiderPress II](https://ciderpress2.com) / [AppleCommander](https://github.com/AppleCommander/AppleCommander) on a modern computer.
+   Make sure it keeps file type `SYS` and aux type `$2000`.
+3. Run it: select it in Bitsy Bye, or type `-YANC.SYSTEM` at the BASIC prompt.
+4. Optional – start YANC automatically at boot: ProDOS runs the first `*.SYSTEM` file in the volume directory.
+   In YANC, put the cursor on `YANC.SYSTEM` in the volume root and press `4` then `B`.
+
+Alternatively, make `YANC.po` itself bootable by copying a `PRODOS` file onto it.
 
 ## Keys
 | Key | Action |
