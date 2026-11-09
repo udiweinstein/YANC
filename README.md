@@ -71,3 +71,6 @@ cd tests && python3 t2.py
 
 ## Credits
 Inspired by Norton Commander (John Socha) and by the many great Apple II file managers that came before.
+
+## License
+MIT – see [LICENSE](LICENSE).
