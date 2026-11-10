@@ -1706,6 +1706,8 @@ KEYBUF      = $B800
 destroy:
         MLICALL P_DESTROY, desp
         bcc @r
+        cmp #$4A                ; ProDOS 8 2.x: incompatible file format
+        beq delext
         cmp #$4B                ; unsupported storage type
         beq delext
         sec

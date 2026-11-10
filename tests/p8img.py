@@ -259,7 +259,7 @@ class ImgEmu(Emu):
         if err: return err
         img = v.img; st = img[o] >> 4; key = v.w16(o + 0x11)
         if any(r.get('ent') == (id(v.img), o) for r in self.refs.values()): return 0x50
-        if st not in (1, 2, 3, 0xD): return 0x4B
+        if st not in (1, 2, 3, 0xD): return 0x4A   # what ProDOS 8 2.x really returns
         if not img[o + 0x1E] & 0x80: return 0x4E
         if st == 0xD:
             if v.w16(key * BS + 4 + 0x21): return 0x4E
