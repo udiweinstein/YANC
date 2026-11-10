@@ -1,5 +1,5 @@
 ;=====================================================================
-;  YANC.SYSTEM - Yet Another Norton Commander, v1.1
+;  YANC.SYSTEM - Yet Another Norton Commander, v1.2
 ;               Norton Commander style file manager
 ;               for the Apple IIc (65C02), 80 columns, ProDOS 8
 ;
@@ -4477,7 +4477,7 @@ helptab:
         .word h1,h0,h2,h3,h4,h5,h6,h7,h0,h9,h10,h11,h11b,h12,h13,h14,h15,h16,h17
         .word 0
 h0:     .byte 0
-h1:     .byte "YANC v1.1 - Yet Another Norton Commander for the Apple IIc", 0
+h1:     .byte "YANC v1.2 - Yet Another Norton Commander for the Apple IIc", 0
 h2:     .byte "Up/Down      Move cursor          ",1,"-Up/",1,"-Down  First / last", 0
 h3:     .byte "Left/Right   Page up / down       Tab            Switch panel", 0
 h4:     .byte "Return       Enter dir / run file Esc/Delete     Parent directory", 0
