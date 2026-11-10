@@ -54,6 +54,15 @@ Alternatively, make `YANC.po` itself bootable by copying a `PRODOS` file onto it
 Locked files are shown with `*` after the name, like `CATALOG`.
 Copy keeps file type, aux type, access and dates. Directories are not copied recursively.
 
+### Extended (forked) files
+GS/OS files with a resource fork (storage type 5 – most of a System 6 disk) are marked with `+` after the name.
+ProDOS 8 itself can't open or delete them, so YANC handles them at block level:
+**copy, move and delete work on them**, with both forks and the Finder info kept.
+ProDOS still does all block allocation – each fork is written to (or freed through) a temporary file
+`YANCTMP.0` / `YANCTMP.1` in the same directory, whose directory entry YANC then takes over.
+If a copy fails (for example disk full), the temporary files are removed again.
+Viewing (`3`) shows only an error for these files.
+
 ## Building
 Needs [cc65](https://cc65.github.io/) (`ca65`, `ld65`) and Python 3:
 ```
@@ -64,6 +73,9 @@ This writes `release/YANC.SYSTEM` and `release/YANC.po`.
 ## Tests
 `tests/` contains a small harness: a 65C02 CPU ([py65](https://github.com/mnaberez/py65)), the IIc 80-column
 screen memory, and a simulated ProDOS MLI backed by host folders (plus real `.po` images for block I/O).
+`p8img.py` is a second MLI simulation working on real ProDOS images with ProDOS 8 rules (OPEN and DESTROY
+refuse extended files), with a checker for the whole volume (every block used once, bitmap and file counts right);
+`t8.py` uses it to test extended files.
 ```
 pip install py65 pillow
 cd tests && python3 t2.py
@@ -79,7 +91,7 @@ cd tests && python3 t2.py
 | `$5000–$6FFF` | directory entries of both panels (128 each) |
 | `$7000–$77FF` | ProDOS file buffers |
 | `$7C00–$7DFF` | directory block buffer |
-| `$8000–$BBFF` | copy / view buffer |
+| `$8000–$BBFF` | copy / view buffer (`$B400–$B9FF`: index and extended key blocks) |
 
 ## Credits
 Inspired by Norton Commander (John Socha) and by the many great Apple II file managers that came before.

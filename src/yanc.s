@@ -1,5 +1,5 @@
 ;=====================================================================
-;  YANC.SYSTEM - Yet Another Norton Commander, v1.0
+;  YANC.SYSTEM - Yet Another Norton Commander, v1.1
 ;               Norton Commander style file manager
 ;               for the Apple IIc (65C02), 80 columns, ProDOS 8
 ;
@@ -240,6 +240,18 @@ firstblk:.res 2
 firstoff:.res 2
 tgtoff: .res 2
 oldtop: .res 1
+xpath:  .res 2          ; extended files (see "Extended files")
+extkey: .res 2
+srcunit:.res 1
+fork:   .res 1
+tkeyl:  .res 2
+tkeyh:  .res 2
+tmade:  .res 2
+dirkey: .res 2
+pidx:   .res 1
+plen1:  .res 1
+fhdr:   .res 8
+bidx:   .res 2
 
 ;====================================================================
         .code
@@ -933,7 +945,7 @@ copyloop:
         lda moveflag
         beq @l
         SETPTR despath, fp1
-        MLICALL P_DESTROY, desp
+        jsr destroy
         bcc @l
         jsr showerr
 @abort:
@@ -1023,12 +1035,18 @@ copyone:
         rts
 @all:   inc allflag
 @ovr:   SETPTR despath, fp2
-        MLICALL P_DESTROY, desp
+        jsr destroy
         JCS @err0
         bra @cre
 @long:  lda #ERR_LONG
         jmp @err0
-@open:  SETPTR openpath, fp1
+@open:  lda gfistyp
+        cmp #5
+        bne @std
+        jsr cpext               ; extended (forked) file
+        JCS @errd
+        jmp @ok
+@std:   SETPTR openpath, fp1
         SETPTR openbuf, IOBUF1
         MLICALL P_OPEN, openp
         bcs @errd
@@ -1058,7 +1076,7 @@ copyone:
         jsr gfi2sfi
         MLICALL P_SETINFO, sfip
         bcs @err0
-        lda #0
+@ok:    lda #0
         clc
         rts
 @errc:  pha
@@ -1302,7 +1320,7 @@ k_delete:
         lda #ERR_LONG
         jmp @err
 :       SETPTR despath, fp1
-        MLICALL P_DESTROY, desp
+        jsr destroy
         bcc @l
         cmp #$4E
         bne @err
@@ -1333,7 +1351,7 @@ k_delete:
         SETPTR sfipath, fp1
         MLICALL P_SETINFO, sfip
         bcs @err
-        MLICALL P_DESTROY, desp
+        jsr destroy
         bcs @err
         jmp @l
 @err:   jsr showerr
@@ -1434,23 +1452,11 @@ mkboot: jsr pathdepth
         bcc :+
 @nr:    lda #ERR_BOOT
         jmp @err
-:       jsr scanvols            ; find the unit of this volume
-        jsr getvolname
-        ldx #0
-@uv:    cpx vn
-        bne :+
-        lda #$45
+:       jsr getvolname          ; find the unit of this volume
+        jsr findunit
+        bcc :+
         jmp @err
-:       ldy vl,x
-        jsr cmpvol
-        beq @uf
-        inx
-        bra @uv
-@uf:    ldy vl,x
-        lda onbuf,y
-        and #$F0
-        sta blkunit
-        stz closeref
+:       stz closeref
         MLICALL P_CLOSE, closep
         stz firstblk
         stz firstblk+1
@@ -1683,6 +1689,586 @@ entissel:
         rts
 @no:    sec
         rts
+
+;--------------------------------------------------------------------
+; Extended files (storage type 5: data fork + resource fork, made by
+; GS/OS).  ProDOS 8 can't open or destroy them, so YANC works on them
+; at block level.  All block allocation is still done by ProDOS:
+; each fork is written to / freed through a temporary file
+; (YANCTMP.0 / YANCTMP.1 in the same directory) whose directory entry
+; is then edited.
+;--------------------------------------------------------------------
+IDXBUF      = $B400
+MIDXBUF     = $B600
+KEYBUF      = $B800
+
+; DESTROY the file at despath, extended files too.  C=1 A=error
+destroy:
+        MLICALL P_DESTROY, desp
+        bcc @r
+        cmp #$4B                ; unsupported storage type
+        beq delext
+        sec
+@r:     rts
+
+; delete an extended file: free each fork through a temporary file,
+; then turn the file into a sapling whose index block (the old
+; extended key block) lists the two temporary key blocks, and DESTROY it
+delext: lda despath
+        sta xpath
+        lda despath+1
+        sta xpath+1
+        jsr xfind
+        bcs @r
+        ldy #$1E
+        lda (ptr2),y
+        bmi :+
+        lda #$4E                ; locked
+        sec
+@r:     rts
+:       jsr rdkey
+        bcs @r
+        lda xpath
+        ldy xpath+1
+        jsr mktmp
+        bcs @r
+        stz fork
+@fk:    jsr forkptr
+        ldx fork
+        stz tkeyl,x
+        stz tkeyh,x
+        lda (vp)
+        beq @nf
+        jsr tcreate
+        bcs @r
+        jsr tfind
+        bcs @r
+        ldx fork
+        ldy #$11
+        lda (ptr2),y
+        sta tkeyl,x
+        iny
+        lda (ptr2),y
+        sta tkeyh,x
+        lda (vp)                ; temp entry -> this fork
+        asl a
+        asl a
+        asl a
+        asl a
+        sta tmp
+        lda (ptr2)
+        and #$0F
+        ora tmp
+        sta (ptr2)
+        jsr ent16
+        ldy #7
+:       lda (vp),y
+        sta (ep2),y
+        dey
+        bne :-
+        jsr wrcur
+        bcs @r
+        jsr tsetd
+        MLICALL P_DESTROY, tdesp
+        bcs @r
+@nf:    inc fork
+        lda fork
+        cmp #2
+        bne @fk
+        lda #>KEYBUF
+        jsr zero2
+        ldx #1
+:       lda tkeyl,x
+        sta KEYBUF,x
+        lda tkeyh,x
+        sta KEYBUF+256,x
+        dex
+        bpl :-
+        lda extkey
+        ldy extkey+1
+        ldx #>KEYBUF
+        jsr wrblock
+        bcs @r2
+        jsr xfind
+        bcs @r2
+        lda (ptr2)
+        and #$0F
+        ora #$20                ; sapling
+        sta (ptr2)
+        ldy #$15                ; EOF = $000400
+        lda #0
+        sta (ptr2),y
+        iny
+        lda #4
+        sta (ptr2),y
+        iny
+        lda #0
+        sta (ptr2),y
+        jsr wrcur
+        bcs @r2
+        MLICALL P_DESTROY, desp
+@r2:    rts
+
+; copy the extended file fp1 to fp2 (just created as an empty file)
+; C=1 A=error
+cpext:  stz tmade
+        stz tmade+1
+        lda #<fp1
+        ldy #>fp1
+        jsr findent
+        JCS @r
+        jsr rdkey
+        JCS @r
+        lda blkunit
+        sta srcunit
+        lda #<fp2
+        ldy #>fp2
+        jsr mktmp
+        JCS @r
+        SETPTR sfipath, fp2     ; type, dates, access - while it's a plain file
+        jsr gfi2sfi
+        MLICALL P_SETINFO, sfip
+        JCS @r
+        ; 1: write each fork to a temporary file
+        stz fork
+@fk:    jsr forkptr
+        lda (vp)
+        beq @nf
+        jsr tcreate
+        JCS @e
+        ldx fork
+        inc tmade,x
+        SETPTR openpath, inbuf
+        SETPTR openbuf, IOBUF1
+        MLICALL P_OPEN, openp
+        JCS @e
+        lda openref
+        sta writeref
+        jsr cpfork
+        php
+        pha
+        stz closeref
+        MLICALL P_CLOSE, closep
+        pla
+        plp
+        JCS @e
+@nf:    inc fork
+        lda fork
+        cmp #2
+        bne @fk
+        ; 2: take the forks over from the temporary files
+        stz fork
+@mv:    jsr forkptr
+        lda (vp)
+        beq @mn
+        jsr tfind
+        JCS @e
+        lda (ptr2)
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        sta (vp)
+        jsr ent16
+        ldy #7
+:       lda (ep2),y
+        sta (vp),y
+        dey
+        bne :-
+        lda #0                  ; remove the temporary entry
+        sta (ptr2)
+        jsr wrcur
+        JCS @e
+        ldx fork
+        stz tmade,x
+        lda dirkey              ; file_count - 1
+        ldy dirkey+1
+        ldx #>BUFA
+        jsr rdblock
+        JCS @e
+        lda BUFA+$25
+        bne :+
+        dec BUFA+$26
+:       dec BUFA+$25
+        lda dirkey
+        ldy dirkey+1
+        ldx #>BUFA
+        jsr wrblock
+        JCS @e
+@mn:    inc fork
+        lda fork
+        cmp #2
+        bne @mv
+        ; 3: make fp2 an extended file, its key block the new extended key block
+        lda #<fp2
+        ldy #>fp2
+        jsr findent
+        JCS @e
+        lda (ptr2)
+        and #$0F
+        ora #$50
+        sta (ptr2)
+        jsr ent16
+        ldy #3                  ; blocks used = 1 + both forks
+        sec
+        lda KEYBUF+3
+        adc KEYBUF+$103
+        sta (ep2),y
+        iny
+        lda KEYBUF+4
+        adc KEYBUF+$104
+        sta (ep2),y
+        iny                     ; EOF = $000200
+        lda #0
+        sta (ep2),y
+        iny
+        lda #2
+        sta (ep2),y
+        iny
+        lda #0
+        sta (ep2),y
+        jsr wrcur
+        JCS @e
+        ldy #2
+        lda (ep2),y
+        tax
+        dey
+        lda (ep2),y
+        phx
+        ply
+        ldx #>KEYBUF
+        jmp wrblock
+@e:     pha                     ; error: remove the temporary files
+        stz closeref
+        MLICALL P_CLOSE, closep
+        stz fork
+@d:     ldx fork
+        lda tmade,x
+        beq :+
+        jsr tsetd
+        MLICALL P_DESTROY, tdesp
+:       inc fork
+        lda fork
+        cmp #2
+        bne @d
+        pla
+        sec
+@r:     rts
+
+; write the fork at (vp) of the source file (unit srcunit) to file writeref
+cpfork: lda srcunit
+        sta blkunit
+        ldy #7
+:       lda (vp),y
+        sta fhdr,y
+        dey
+        bpl :-
+        stz bidx
+        stz bidx+1
+        lda fhdr
+        cmp #2
+        bcc @seed
+        ldx #>IDXBUF
+        cmp #3
+        bne :+
+        ldx #>MIDXBUF
+:       lda fhdr+1
+        ldy fhdr+2
+        jsr rdblock
+        bcc @loop
+        rts
+@seed:  lda #>IDXBUF            ; seedling: fake index block
+        jsr zero2
+        lda fhdr+1
+        sta IDXBUF
+        lda fhdr+2
+        sta IDXBUF+256
+@loop:  lda fhdr+5              ; bytes left
+        ora fhdr+6
+        ora fhdr+7
+        bne :+
+        clc
+        rts
+:       lda fhdr
+        cmp #3
+        bne @dat
+        lda bidx
+        bne @dat
+        ldx bidx+1              ; tree: next index block
+        lda MIDXBUF,x
+        ldy MIDXBUF+256,x
+        ldx #>IDXBUF
+        jsr rdblkz
+        bcs @r
+@dat:   ldx bidx
+        lda IDXBUF,x
+        ldy IDXBUF+256,x
+        ldx #>COPYBUF
+        jsr rdblkz
+        bcs @r
+        lda fhdr+7
+        bne @full
+        lda fhdr+6
+        cmp #2
+        bcs @full
+        lda fhdr+5
+        sta writereq
+        lda fhdr+6
+        sta writereq+1
+        bra @w
+@full:  stz writereq
+        lda #2
+        sta writereq+1
+@w:     MLICALL P_WRITE, writep
+        bcs @r
+        sec
+        lda fhdr+5
+        sbc writereq
+        sta fhdr+5
+        lda fhdr+6
+        sbc writereq+1
+        sta fhdr+6
+        lda fhdr+7
+        sbc #0
+        sta fhdr+7
+        inc bidx
+        bne :+
+        inc bidx+1
+:
+        jmp @loop
+@r:     rts
+
+; read block A/Y into page X, or clear the page when the block is 0 (sparse)
+rdblkz: sta tmp
+        tya
+        ora tmp
+        bne :+
+        txa
+        jsr zero2
+        clc
+        rts
+:       lda tmp
+        jmp rdblock
+
+; clear the two pages starting at page A
+zero2:  sta sptr+1
+        stz sptr
+        lda #0
+        tay
+        ldx #2
+:       sta (sptr),y
+        iny
+        bne :-
+        inc sptr+1
+        dex
+        bne :-
+        rts
+
+; vp -> mini entry of fork 'fork' in KEYBUF
+forkptr:
+        stz vp
+        lda fork
+        clc
+        adc #>KEYBUF
+        sta vp+1
+        rts
+
+; ep2 = ptr2 + $10 (so (ep2),1..7 = key, blocks used, EOF)
+ent16:  clc
+        lda ptr2
+        adc #$10
+        sta ep2
+        lda ptr2+1
+        adc #0
+        sta ep2+1
+        rts
+
+; key block of entry (ptr2) -> extkey, read it into KEYBUF
+rdkey:  ldy #$11
+        lda (ptr2),y
+        sta extkey
+        iny
+        lda (ptr2),y
+        sta extkey+1
+        tay
+        lda extkey
+        ldx #>KEYBUF
+        jmp rdblock
+
+wrcur:  lda curblk
+        ldy curblk+1
+        ldx #>BUFA
+        jmp wrblock
+
+xfind:  lda xpath
+        ldy xpath+1
+        jmp findent
+
+; temporary file name: last character = fork number
+tsetd:  lda fork
+        ora #'0'
+        ldy inbuf
+        sta inbuf,y
+        rts
+tcreate:
+        jsr tsetd
+        MLICALL P_CREATE, crtp
+        rts
+tfind:  jsr tsetd
+        lda #<inbuf
+        ldy #>inbuf
+        jmp findent
+
+; inbuf = directory of the path at A/Y + "/YANCTMP.0" ; C=1 too long
+mktmp:  sta ptr
+        sty ptr+1
+        lda (ptr)
+        tay
+:       lda (ptr),y
+        cmp #'/'
+        beq :+
+        dey
+        bne :-
+:       cpy #56
+        bcs @long
+        sty tmp
+:       lda (ptr),y
+        sta inbuf,y
+        dey
+        bne :-
+        ldy tmp
+        ldx #0
+:       lda s_tmpn,x
+        iny
+        sta inbuf,y
+        inx
+        cpx #9
+        bne :-
+        sty inbuf
+        clc
+        rts
+@long:  lda #ERR_LONG
+        rts
+
+; find the directory entry of the file with full path A/Y by reading
+; directory blocks.  C=0: ptr2 -> entry in BUFA, curblk = that block,
+; dirkey = key block of its directory, blkunit = its unit
+findent:
+        sta ptr
+        sty ptr+1
+        jsr getvn2
+        jsr findunit
+        JCS @r
+        lda (ptr)
+        inc a
+        sta plen1
+        lda #2
+        sta curblk
+        stz curblk+1
+        ldy vbuf                ; last character of the volume name
+        iny                     ; the '/' after it
+@comp:  iny                     ; skip '/', next name -> tmpname
+        ldx #0
+@cc:    cpy plen1
+        bcs @ce
+        lda (ptr),y
+        cmp #'/'
+        beq @ce
+        inx
+        sta tmpname,x
+        iny
+        bra @cc
+@ce:    stx tmpname
+        sty pidx
+        lda curblk
+        sta dirkey
+        lda curblk+1
+        sta dirkey+1
+@rb:    lda curblk
+        ldy curblk+1
+        ldx #>BUFA
+        jsr rdblock
+        bcs @r
+        SETPTR ptr2, BUFA+4
+        lda #13
+        sta cnt
+@en:    lda (ptr2)
+        beq @nx
+        and #$F0
+        cmp #$E0
+        bcs @nx
+        jsr entisnm
+        bcc @fnd
+@nx:    clc
+        lda ptr2
+        adc #39
+        sta ptr2
+        bcc :+
+        inc ptr2+1
+:       dec cnt
+        bne @en
+        lda BUFA+2
+        sta curblk
+        lda BUFA+3
+        sta curblk+1
+        ora curblk
+        bne @rb
+        lda #$46
+        sec
+@r:     rts
+@fnd:   ldy pidx
+        cpy plen1
+        bcc :+
+        clc                     ; last name of the path
+        rts
+:       ldy #$11                ; a directory: go into it
+        lda (ptr2),y
+        sta curblk
+        iny
+        lda (ptr2),y
+        sta curblk+1
+        ldy pidx
+        jmp @comp
+
+; C=0 if directory entry (ptr2) has the name in tmpname
+entisnm:
+        lda (ptr2)
+        and #$0F
+        cmp tmpname
+        bne @no
+        tay
+@l:     lda (ptr2),y
+        cmp tmpname,y
+        bne @no
+        dey
+        bne @l
+        clc
+        rts
+@no:    sec
+        rts
+
+; unit of volume vbuf -> blkunit ; C=1 A=$45 if not on line
+findunit:
+        jsr scanvols
+        ldx #0
+@uv:    cpx vn
+        bne :+
+        lda #$45
+        sec
+        rts
+:       ldy vl,x
+        jsr cmpvol
+        beq @uf
+        inx
+        bra @uv
+@uf:    ldy vl,x
+        lda onbuf,y
+        and #$F0
+        sta blkunit
+        clc
+        rts
+
+s_tmpn: .byte "YANCTMP.0"
 
 ;--------------------------------------------------------------------
 ; Viewer (3)
@@ -2361,6 +2947,7 @@ pathdepth:
 ; "/VOL" part of path(pn) -> vbuf
 getvolname:
         jsr pathptr
+getvn2:
         lda (ptr)
         sta tmp
         lda #'/'
@@ -2978,14 +3565,19 @@ drawfrow:
 @nt:    lda #' '
         jsr putc
 @name:  jsr prname15
-        ldy #E_STOR             ; '*' after the name = locked (like CATALOG)
-        lda (ep),y
+        ldy #E_STOR             ; after the name: '*' locked (like CATALOG),
+        lda (ep),y              ; '+' extended (forked) file
         cmp #$FF
         beq @nl
-        ldy #E_ACC
+        ldx #'+'
+        cmp #$50
+        beq :+
+        ldx #' '
+:       ldy #E_ACC
         lda (ep),y
-        bmi @nl
-        lda #'*'
+        bmi :+
+        ldx #'*'
+:       txa
         bra @pl
 @nl:    lda #' '
 @pl:    jsr putc
@@ -3883,7 +4475,7 @@ helptab:
         .word h1,h0,h2,h3,h4,h5,h6,h7,h0,h9,h10,h11,h11b,h12,h13,h14,h15,h16,h17
         .word 0
 h0:     .byte 0
-h1:     .byte "YANC v1.0 - Yet Another Norton Commander for the Apple IIc", 0
+h1:     .byte "YANC v1.1 - Yet Another Norton Commander for the Apple IIc", 0
 h2:     .byte "Up/Down      Move cursor          ",1,"-Up/",1,"-Down  First / last", 0
 h3:     .byte "Left/Right   Page up / down       Tab            Switch panel", 0
 h4:     .byte "Return       Enter dir / run file Esc/Delete     Parent directory", 0
@@ -3892,7 +4484,7 @@ h6:     .byte "+  -  *      Tag all/none/invert  Ctrl-R         Re-read disks", 
 h7:     .byte "Ctrl-S       Swap panels", 0
 h9:     .byte "1 Help       2 Choose volume      3 View (text / hex)  4 Lock", 0
 h10:    .byte "5 Copy       6 Rename / Move      7 Make directory", 0
-h11:    .byte "8 Delete     9 Sort name/type     0 Quit     * = locked file", 0
+h11:    .byte "8 Delete     9 Sort name/type     0 Quit     * locked + forked", 0
 h11b:   .byte "4 then B: make the .SYSTEM file under the cursor boot first", 0
 h12:    .byte "Commands work on tagged files, or on the file under the cursor.", 0
 h13:    .byte "Copy / Move: to the directory shown in the other panel.", 0
@@ -3971,3 +4563,11 @@ blkunit:  .byte 0
 blkbuf:   .word 0
 blkno:    .word 0
 quitp:    .byte 4, 0, 0, 0, 0, 0, 0
+crtp:     .byte 7               ; CREATE of a temporary file (path in inbuf)
+          .word inbuf
+          .byte $C3, $00
+          .word 0
+          .byte 1
+          .word 0, 0
+tdesp:    .byte 1
+          .word inbuf
