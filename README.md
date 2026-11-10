@@ -11,12 +11,17 @@ The focus is on feeling like the original NC, with fast drive switching: press `
 - ProDOS 8 (tested with 1.9 and 2.4)
 
 ## Download
+The latest version is on the [Releases](https://github.com/udiweinstein/YANC/releases/latest) page, and also here:
 - [`release/YANC.po`](release/YANC.po) – 140K ProDOS disk image containing `YANC.SYSTEM`
 - [`release/YANC.SYSTEM`](release/YANC.SYSTEM) – the program itself (ProDOS type `SYS` / `$FF`, aux type `$2000`)
 
 > **Note: `YANC.po` is not a bootable disk.** It holds only `YANC.SYSTEM` – there is no `PRODOS` file on it
 > (ProDOS is Apple's software and is not redistributed here).
 > Copy `YANC.SYSTEM` to a disk or hard drive that already boots ProDOS, then run it from there.
+
+## What's new
+- **1.2** – copy, move and delete extended (forked) GS/OS files; they are marked with `+`
+- **1.0** – first release
 
 ## Getting started
 1. Boot any ProDOS 8 disk (ProDOS 2.4.x from [prodos8.com](https://prodos8.com) is recommended).
