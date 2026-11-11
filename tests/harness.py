@@ -77,7 +77,8 @@ class Emu:
                 self.mli()
                 continue
             if self.mem.m[self.cpu.pc] == 0x42:     # WDM: 2-byte NOP on 65C02
-                if getattr(self, 'kegs', None) and self.mem.m[self.cpu.pc + 1] == 0x58:
+                if getattr(self, 'kegs', None) and self.mem.m[self.cpu.pc + 1] == 0xEA \
+                        and self.mem.m[self.cpu.pc + 2] == 0xD8:
                     self.kegs.call(self)
                 self.cpu.pc = (self.cpu.pc + 2) & 0xFFFF
                 continue

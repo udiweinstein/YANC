@@ -4373,9 +4373,13 @@ getkey: lda KBD
 ;
 ; KEGS (github.com/udiweinstein/kegs) lets programs list the disk
 ; images in the host's disk images folder and insert / eject them.
-; The call is the 3 bytes $42,$58,$EA with A = command and X/Y =
-; parameter block.  On a real 65C02 / 65816 those bytes are a 2-byte
-; NOP and a NOP, so YANC just doesn't see KEGS there.
+; The call is the 3 bytes $42,$EA,$D8 with A = command and X/Y =
+; parameter block.  It is safe on every machine and emulator:
+;  - real 65C02 / 65816: $42,$EA is a 2-byte NOP, then CLD
+;  - official KEGS and GSplus: "WDM $EA,xx" is their detection code,
+;    ignored without error (other WDM codes stop them in the debugger)
+;  - other 65C02 emulators: $42 is a 2-byte NOP
+; Only Udi's KEGS answers 'K', so only there the KEGS options appear.
 ; A panel in "KEGS mode" (pmode,x = 1) shows the images; its path is
 ; "KEGS:/" or "KEGS:/SUBFOLDER".  Entries use KEGS's 32-byte layout:
 ; +0 kind (1 folder, 2 image, 3 = ".."), +1 drive it is in ($61 =
@@ -4395,7 +4399,7 @@ KLISTBUF    = COPYBUF+$1000     ; scratch LIST before MOUNT
         lda #cmd
         ldx #<kblk
         ldy #>kblk
-        .byte $42, $58, $EA
+        .byte $42, $EA, $D8
 .endmacro
 
 ; At start: is KEGS there?  Also find the drive YANC runs from (kprot)
@@ -4403,7 +4407,7 @@ kdetect:
         stz kegs
         stz kprot
         lda #K_ID
-        .byte $42, $58, $EA
+        .byte $42, $EA, $D8
         cmp #'K'
         bne @r
         lda #1
