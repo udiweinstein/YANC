@@ -260,6 +260,8 @@ kegs:   .res 1          ; 1 = running in KEGS (see "KEGS disk images")
 kprot:  .res 1          ; drive YANC runs from (slot*16 + drive)
 pmode:  .res 2          ; per panel: 0 ProDOS, 1 KEGS disk images
 ksel:   .res 1
+knopt:  .res 1          ; number of drives in the insert box
+kopt:   .res 6          ; their DRIVES entry numbers
 
 ;====================================================================
         .code
@@ -4377,7 +4379,8 @@ getkey: lda KBD
 ; A panel in "KEGS mode" (pmode,x = 1) shows the images; its path is
 ; "KEGS:/" or "KEGS:/SUBFOLDER".  Entries use KEGS's 32-byte layout:
 ; +0 kind (1 folder, 2 image, 3 = ".."), +1 drive it is in ($61 =
-; slot 6 drive 1), +2,+3 size in KB, +4 name length, +5.. name.
+; slot 6 drive 1), +2,+3 size in KB, +4 name length, +5.. name,
+; +31 the slot the image belongs in (6 = 5.25", 5 = 3.5", 7 = hard disk).
 ;====================================================================
 K_ID        = 0
 K_LIST      = 1
@@ -4387,7 +4390,6 @@ K_DRIVES    = 4
 KROOTLEN    = 6                 ; "KEGS:/"
 KDRVBUF     = COPYBUF           ; DRIVES result (12 x 32 bytes)
 KLISTBUF    = COPYBUF+$1000     ; scratch LIST before MOUNT
-KNOPTS      = 9                 ; Auto + 8 drives in the insert box
 
 .macro KEGSCALL cmd
         lda #cmd
@@ -4710,14 +4712,43 @@ kinsert:
         lda #>KDRVBUF
         sta kblk+1
         KEGSCALL K_DRIVES
-        stz ksel
+        ; drives offered: D1 and D2 of the image's slot (6 = 5.25",
+        ; 5 = 3.5", 7 = hard disk); if KEGS didn't say, all of them
+        ldy #31
+        lda (ep),y
+        cmp #5
+        bcc @all
+        cmp #8
+        bcs @all
+        sec
+        sbc #5
+        asl a                   ; DRIVES entry of drive 1
+        sta kopt
+        inc a
+        sta kopt+1
+        lda #2
+        bra @nopt
+@all:   ldx #5
+:       lda kalltab,x
+        sta kopt,x
+        dex
+        bpl :-
+        lda #6
+@nopt:  sta knopt
+        lda #$FF                ; first drive that isn't YANC's
+@fs:    inc a
+        jsr kprotopt
+        beq @fs
+        sta ksel
         lda #18
         sta bl
         lda #61
         sta br
         lda #5
         sta bt
-        lda #19
+        lda knopt
+        clc
+        adc #11
         sta bb
         lda #<t_insert
         ldy #>t_insert
@@ -4740,11 +4771,7 @@ kinsert:
         sta attr
 :       lda #' '
         jsr putc
-        cpx #0
-        bne @drv
-        PRINT s_kauto
-        bra @pad
-@drv:   jsr kdrvent             ; ptr2 = DRIVES entry of option X
+        jsr kdrvent             ; ptr2 = DRIVES entry of option X
         lda (ptr2)
         jsr prdrive
         lda #' '
@@ -4774,9 +4801,14 @@ kinsert:
         bra @pad
 :       stz attr
         inx
-        cpx #KNOPTS
+        cpx knopt
         bne @o
-        GOTO 21,18
+        lda knopt
+        clc
+        adc #9
+        tay
+        ldx #21
+        jsr gotoxy
         PRINT s_kins
 @k:     jsr getkey
         cmp #$0A
@@ -4794,7 +4826,7 @@ kinsert:
         jmp main_redraw
 @dn:    lda ksel
 @dn2:   inc a
-        cmp #KNOPTS
+        cmp knopt
         bcs @k
         jsr kprotopt
         beq @dn2
@@ -4818,14 +4850,11 @@ kinsert:
         KEGSCALL K_LIST
         jsr kapiidx
         sta kblk
-        stz kblk+1
-        lda ksel
-        beq :+
-        tax
+        ldx ksel
         jsr kdrvent
         lda (ptr2)
         sta kblk+1
-:       lda kprot
+        lda kprot
         sta kblk+2
         KEGSCALL K_MOUNT
         bcc kopen
@@ -4875,8 +4904,8 @@ kopen:  pha
 ; Z=1 if option A is the drive YANC runs from (keeps A)
 kprotopt:
         pha
-        cmp #0
-        beq @n
+        cmp knopt
+        bcs @n
         tax
         jsr kdrvent
         lda (ptr2)
@@ -4889,9 +4918,9 @@ kprotopt:
         ldx #0                  ; Z=1
         rts
 
-; ptr2 = DRIVES entry for insert option X (1..8)
+; ptr2 = DRIVES entry for insert option X
 kdrvent:
-        lda kdrvmap,x
+        lda kopt,x
         asl a
         asl a
         asl a
@@ -4904,7 +4933,7 @@ kdrvent:
         adc #0
         sta ptr2+1
         rts
-kdrvmap:.byte 0, 2, 3, 0, 1, 4, 5, 6, 7     ; S6D1 S6D2 S5D1 S5D2 S7D1-4
+kalltab:.byte 2, 3, 0, 1, 4, 5               ; S6D1 S6D2 S5D1 S5D2 S7D1 S7D2
 
 ; 8: eject the image under the cursor
 k_keject:
@@ -4952,7 +4981,7 @@ kname27:
         sta ptr
         lda ep+1
         sta ptr+1
-        lda #27
+        lda #26
 ; print the name at (ptr)+4 (length) / +5.., at most A chars
 knamep: sta tmp2
         ldy #4
@@ -5175,7 +5204,6 @@ s_khdr:   .byte " Name                    Size Drive   ", 0
 s_kroot:  .byte "KEGS:/"
 s_kup:    .byte "  <UP>", 0
 s_kdir:   .byte " <DIR>", 0
-s_kauto:  .byte "Auto (by disk type)", 0
 s_kyanc:  .byte "(YANC runs from here)", 0
 s_kempty: .byte "(empty)", 0
 s_kins:   .byte "Enter=Insert   Esc=Cancel", 0

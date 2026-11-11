@@ -12,7 +12,7 @@ host = '/tmp/kegsdisks'
 shutil.rmtree(host, ignore_errors=True)
 os.makedirs(os.path.join(host, 'GAMES'))
 for n, sz in [('Karateka.dsk', 143360), ('AllStar.2mg', 819264), ('AppleWorks3_Hebrew.po', 819200),
-              ('Hard1.hdv', 33554432 // 64), ('PrintShop.dsk', 143360), ('notes.txt', 10)]:
+              ('Hard1.hdv', 33554432 // 8), ('PrintShop.dsk', 143360), ('notes.txt', 10)]:
     open(os.path.join(host, n), 'wb').truncate(sz)
 open(os.path.join(host, 'GAMES', 'Zork.dsk'), 'wb').truncate(143360)
 
@@ -48,11 +48,12 @@ check('Eject' in e.screen()[23], 'key bar shows Eject')
 step('K', 'k_search')                    # jump to Karateka
 step(RET, 'k_insert')
 s = scr()
-check('Insert disk' in s and 'Auto (by disk type)' in s and 'S6,D1' in s, 'insert box with drives')
+check('Insert disk' in s and 'S6,D1' in s and 'S6,D2' in s, 'insert box offers S6 drives')
+check('Auto' not in s and 'S5,D1' not in s and 'S7,D1' not in s, 'only the 5.25" slot is offered')
 check('(YANC runs from here)' in s, 'YANC drive marked')        # SYSDISK unit $60 -> S6,D1
 step(RET, 'k_inserted')                  # Auto
 m = [c for c in e.kegs.calls if c[0] == 'mount']
-check(m and m[-1][2] == 0 and m[-1][3] == 0x61, 'MOUNT auto with YANC drive protected: %r' % (m[-1:],))
+check(m and m[-1][2] == 0x62 and m[-1][3] == 0x61, 'MOUNT into S6,D2 (cursor skips YANC drive): %r' % (m[-1:],))
 check(e.kegs.drives.get(0x62, '').endswith('Karateka.dsk'), 'Karateka went to S6,D2 (S6,D1 is YANC)')
 s = scr()
 check('/KARATEKA' in e.screen()[0] and 'KARATEKA.SYSTEM' in s, 'panel opened the inserted disk')
@@ -70,6 +71,14 @@ check('KEGS:/GAMES' in s and 'Zork.dsk' in s and '<UP>' in s, 'sub-folder with U
 step(ESC, 'k_back')
 s = scr()
 check('KEGS:/GAMES' not in s and 'Karateka.dsk' in s, 'back in the images folder')
+step('A' + RET, 'k_insert35')           # AllStar.2mg (3.5") -> S5 drives
+s = scr()
+check('S5,D1' in s and 'S5,D2' in s and 'S6,D1' not in s, '3.5" image offers S5 drives only')
+step(ESC)
+step('H' + RET, 'k_inserthd')           # Hard1.hdv -> S7 drives
+s = scr()
+check('S7,D1' in s and 'S7,D2' in s and 'S5,D1' not in s, 'hard disk offers S7 drives only')
+step(ESC)
 step(TAB + '5', 'k_copyto')              # other panel copies into KEGS -> error
 check('other panel is KEGS images' in scr(), 'copy to KEGS panel refused')
 step(' ' + TAB + '2' + RET, 'k_back_to_vol')   # back to a ProDOS volume in the KEGS panel

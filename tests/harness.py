@@ -464,10 +464,10 @@ class FakeKegs:
         self.last = []
     def _get(self, emu, a): return emu.mem.m[a & 0xFFFF]
     def _put(self, emu, a, v): emu.mem.m[a & 0xFFFF] = v & 0xFF
-    def _name(self, emu, a, name):
-        n = name[:27]
+    def _name(self, emu, a, name, mx=27):
+        n = name[:mx]
         self._put(emu, a, len(n))
-        for i in range(27):
+        for i in range(mx):
             self._put(emu, a + 1 + i, ord(n[i]) if i < len(n) else 0)
     def _drive_with(self, path):
         for sd, p in self.drives.items():
@@ -503,7 +503,9 @@ class FakeKegs:
                     kb = 0 if k == 1 else min((os.path.getsize(full) + 1023) >> 10, 65535)
                     self._put(emu, e, k); self._put(emu, e + 1, 0 if k == 1 else self._drive_with(full))
                     self._put(emu, e + 2, kb); self._put(emu, e + 3, kb >> 8)
-                    self._name(emu, e + 4, n)
+                    self._name(emu, e + 4, n, 26)
+                    sz = os.path.getsize(full)
+                    self._put(emu, e + 31, 0 if k == 1 else (6 if sz <= 250000 else (5 if sz <= 1700000 else 7)))
                 res = min(len(ents), mx)
         elif cmd == 2:
             idx, sd, prot = g(0), g(1), g(2)
