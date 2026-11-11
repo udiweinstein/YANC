@@ -4828,10 +4828,48 @@ kinsert:
 :       lda kprot
         sta kblk+2
         KEGSCALL K_MOUNT
-        bcc kdone
+        bcc kopen
         lda #ERR_KMOUNT
         jsr showerr
 kdone:  jsr reloadboth
+        jmp main_redraw
+
+; After inserting: show the disk itself in this panel, if ProDOS sees it
+; there (A = drive used, slot*16 + drive).  Otherwise (DOS 3.3 disk,
+; or a hard disk ProDOS maps elsewhere) stay in the images list.
+kopen:  pha
+        and #$70                ; ProDOS unit DSSS0000
+        sta tmp
+        pla
+        and #$0F
+        cmp #2
+        bne :+
+        lda tmp
+        ora #$80
+        sta tmp
+:       jsr scanvols
+        ldx #0
+@v:     cpx vn
+        beq kdone
+        ldy vl,x
+        lda onbuf,y
+        and #$F0
+        cmp tmp
+        beq @f
+        inx
+        bra @v
+@f:     lda cp
+        sta pn
+        tax
+        stz pmode,x             ; back to a ProDOS panel
+        jsr setvol
+        jsr loaddir
+        lda cp                  ; other panel: refresh
+        eor #1
+        sta pn
+        jsr reloadkeep
+        lda cp
+        sta pn
         jmp main_redraw
 
 ; Z=1 if option A is the drive YANC runs from (keeps A)

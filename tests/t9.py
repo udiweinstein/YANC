@@ -19,6 +19,14 @@ open(os.path.join(host, 'GAMES', 'Zork.dsk'), 'wb').truncate(143360)
 vols = setup()
 e = Emu(BIN, vols, '/SYSDISK/')
 e.kegs = FakeKegs(host)
+e.kegs.drives = {0x61: '/x/Sysdisk.po', 0x71: '/x/Hard1.hdv', 0x62: '/x/Blank.po'}
+kvol = os.path.join('/tmp/ncvols', 'KARATEKA'); os.makedirs(kvol, exist_ok=True)
+open(os.path.join(kvol, 'KARATEKA.SYSTEM'), 'wb').write(bytes(5000))
+def on_mount(emu, sd, path):        # the inserted disk replaces BLANK in S6,D2
+    if sd == 0x62 and path.endswith('Karateka.dsk'):
+        emu.vols.pop('BLANK', None)
+        emu.vols['KARATEKA'] = dict(unit=0xE0, path=kvol, total=280)
+e.kegs.on_mount = on_mount
 UP, DN, RET, ESC, TAB = '\x0b', '\x0a', '\r', '\x1b', '\t'
 scr = lambda: '\n'.join(e.screen())
 def step(keys, name=None):
@@ -47,7 +55,11 @@ m = [c for c in e.kegs.calls if c[0] == 'mount']
 check(m and m[-1][2] == 0 and m[-1][3] == 0x61, 'MOUNT auto with YANC drive protected: %r' % (m[-1:],))
 check(e.kegs.drives.get(0x62, '').endswith('Karateka.dsk'), 'Karateka went to S6,D2 (S6,D1 is YANC)')
 s = scr()
-check('S6,D2' in s, 'panel shows the drive')
+check('/KARATEKA' in e.screen()[0] and 'KARATEKA.SYSTEM' in s, 'panel opened the inserted disk')
+step('2' + DN * 3 + RET, 'k_panel2')       # back to the KEGS images
+s = scr()
+check('Karateka.dsk' in s and 'S6,D2' in s, 'images list shows the drive')
+step('K', None)
 step('8', 'k_ejectdlg')
 check('Eject disk' in scr(), 'eject dialog')
 step('y', 'k_ejected')

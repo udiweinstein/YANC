@@ -460,6 +460,7 @@ class FakeKegs:
         self.folder = folder
         self.drives = {}            # slot*16+drive -> host path
         self.calls = []
+        self.on_mount = None        # (emu, sd, path) -> called after MOUNT
         self.last = []
     def _get(self, emu, a): return emu.mem.m[a & 0xFFFF]
     def _put(self, emu, a, v): emu.mem.m[a & 0xFFFF] = v & 0xFF
@@ -512,9 +513,11 @@ class FakeKegs:
                 sz = os.path.getsize(full)
                 slot = 6 if sz <= 250000 else (5 if sz <= 1700000 else 7)
                 sd = next((slot * 16 + d for d in (1, 2) if slot * 16 + d not in self.drives
-                           and slot * 16 + d != prot), slot * 16 + 1)
+                           and slot * 16 + d != prot),
+                          next(slot * 16 + d for d in (1, 2) if slot * 16 + d != prot))
             self.drives = {a: b for a, b in self.drives.items() if b != full}
             self.drives[sd] = full
+            if self.on_mount: self.on_mount(emu, sd, full)
             res = sd
         elif cmd == 3:
             sd = g(1)
