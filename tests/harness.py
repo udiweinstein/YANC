@@ -76,6 +76,11 @@ class Emu:
             if self.cpu.pc == 0xBF00:
                 self.mli()
                 continue
+            if self.mem.m[self.cpu.pc] == 0x42:     # WDM: 2-byte NOP on 65C02
+                if getattr(self, 'kegs', None) and self.mem.m[self.cpu.pc + 1] == 0x58:
+                    self.kegs.call(self)
+                self.cpu.pc = (self.cpu.pc + 2) & 0xFFFF
+                continue
             if self.mem.m[self.cpu.pc] == 0x00 and self.cpu.pc != 0xBF00:
                 raise RuntimeError('BRK at %04X' % self.cpu.pc)
             self.cpu.step()
@@ -447,3 +452,87 @@ def render_png(emu, fn):
             else:
                 d.text((x, y), chr_, font=font, fill=col)
     img.save(fn)
+
+
+class FakeKegs:
+    """The KEGS disk image API (WDM $58,$EA), backed by a host folder."""
+    def __init__(self, folder):
+        self.folder = folder
+        self.drives = {}            # slot*16+drive -> host path
+        self.calls = []
+        self.last = []
+    def _get(self, emu, a): return emu.mem.m[a & 0xFFFF]
+    def _put(self, emu, a, v): emu.mem.m[a & 0xFFFF] = v & 0xFF
+    def _name(self, emu, a, name):
+        n = name[:27]
+        self._put(emu, a, len(n))
+        for i in range(27):
+            self._put(emu, a + 1 + i, ord(n[i]) if i < len(n) else 0)
+    def _drive_with(self, path):
+        for sd, p in self.drives.items():
+            if p == path: return sd
+        return 0
+    def call(self, emu):
+        cpu = emu.cpu
+        cmd, blk = cpu.a, cpu.x | (cpu.y << 8)
+        g = lambda o: self._get(emu, blk + o)
+        res, err = 0, False
+        import os
+        if cmd == 0:
+            res, cpu.x = ord('K'), 1
+            self.calls.append(('id',))
+        elif cmd == 1:
+            buf, mx, ln = g(0) | g(1) << 8, g(2), g(3)
+            sub = bytes(g(4 + i) for i in range(ln)).decode()
+            d = os.path.join(self.folder, sub)
+            self.calls.append(('list', sub))
+            if '..' in sub or not os.path.isdir(d):
+                res, err = 2, True
+            else:
+                ents = []
+                for n in os.listdir(d):
+                    if n.startswith('.'): continue
+                    full = os.path.join(d, n)
+                    if os.path.isdir(full): ents.append((1, n, full))
+                    elif n.lower().endswith(('.po', '.dsk', '.2mg', '.hdv', '.woz')): ents.append((2, n, full))
+                ents.sort(key=lambda e: (e[0], e[1].lower()))
+                self.last = ents
+                for i, (k, n, full) in enumerate(ents[:mx]):
+                    e = buf + i * 32
+                    kb = 0 if k == 1 else min((os.path.getsize(full) + 1023) >> 10, 65535)
+                    self._put(emu, e, k); self._put(emu, e + 1, 0 if k == 1 else self._drive_with(full))
+                    self._put(emu, e + 2, kb); self._put(emu, e + 3, kb >> 8)
+                    self._name(emu, e + 4, n)
+                res = min(len(ents), mx)
+        elif cmd == 2:
+            idx, sd, prot = g(0), g(1), g(2)
+            self.calls.append(('mount', idx, sd, prot))
+            k, n, full = self.last[idx]
+            if sd == 0:
+                sz = os.path.getsize(full)
+                slot = 6 if sz <= 250000 else (5 if sz <= 1700000 else 7)
+                sd = next((slot * 16 + d for d in (1, 2) if slot * 16 + d not in self.drives
+                           and slot * 16 + d != prot), slot * 16 + 1)
+            self.drives = {a: b for a, b in self.drives.items() if b != full}
+            self.drives[sd] = full
+            res = sd
+        elif cmd == 3:
+            sd = g(1)
+            self.calls.append(('eject', sd))
+            self.drives.pop(sd, None)
+            res = sd
+        elif cmd == 4:
+            buf = g(0) | g(1) << 8
+            order = [0x51, 0x52, 0x61, 0x62] + [0x71 + i for i in range(8)]
+            for i, sd in enumerate(order):
+                e = buf + i * 32
+                p = self.drives.get(sd)
+                self._put(emu, e, sd); self._put(emu, e + 1, 1 if p else 0)
+                self._put(emu, e + 2, 0); self._put(emu, e + 3, 0)
+                self._name(emu, e + 4, os.path.basename(p) if p else '')
+            res = 12
+            self.calls.append(('drives',))
+        else:
+            res, err = 1, True
+        cpu.a = res & 0xFF
+        cpu.p = (cpu.p | 1) if err else (cpu.p & ~1)

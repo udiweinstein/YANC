@@ -20,6 +20,7 @@ The latest version is on the [Releases](https://github.com/udiweinstein/YANC/rel
 > Copy `YANC.SYSTEM` to a disk or hard drive that already boots ProDOS, then run it from there.
 
 ## What's new
+- **1.3** – in the [KEGS](https://github.com/udiweinstein/kegs) emulator: `2` → *KEGS disk images...* shows the host computer's disk images; Return inserts one into a drive, `8` ejects it
 - **1.2** – copy, move and delete extended (forked) GS/OS files; they are marked with `+`
 - **1.0** – first release
 
@@ -57,6 +58,14 @@ Alternatively, make `YANC.po` itself bootable by copying a `PRODOS` file onto it
 | `0` Quit | Quit to ProDOS |
 
 Locked files are shown with `*` after the name, like `CATALOG`.
+
+### KEGS disk images (only in the KEGS emulator)
+When YANC runs in [KEGS](https://github.com/udiweinstein/kegs), the `2` Vol box has one more line,
+*KEGS disk images...*. It turns the panel into a list of the disk images in KEGS's disk images folder
+(set in KEGS's F4 menu), with each image's size and the drive it is in.
+Return on a folder opens it; Return on an image asks for the drive (*Auto* picks S6 for 5.25", S5 for 3.5",
+S7 for hard disks) and inserts it. `8` ejects. The drive YANC itself runs from is never touched.
+On a real Apple II nothing changes: YANC checks for KEGS with an instruction that a real 65C02 ignores.
 Copy keeps file type, aux type, access and dates. Directories are not copied recursively.
 
 ### Extended (forked) files

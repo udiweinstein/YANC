@@ -53,19 +53,19 @@ P_QUIT      = $65
 ; Memory map
 ;   $0800-$0FFF  BSS (variables, buffers)
 ;   $1000-$12FF  program loader (copied there when launching)
-;   $2000-$4FFF  code + data
-;   $5000-$5FFF  left panel entries  (128 x 32 bytes)
-;   $6000-$6FFF  right panel entries
-;   $7000-$73FF  ProDOS I/O buffer 1
-;   $7400-$77FF  ProDOS I/O buffer 2
-;   $7C00-$7DFF  directory block buffer
+;   $1400-$17FF  ProDOS I/O buffer 2
+;   $1800-$19FF  directory block buffer
+;   $2000-$5BFF  code + data
+;   $5C00-$6BFF  left panel entries  (128 x 32 bytes)
+;   $6C00-$7BFF  right panel entries
+;   $7C00-$7FFF  ProDOS I/O buffer 1
 ;   $8000-$BBFF  copy / view buffer
 ;--------------------------------------------------------------------
-ENTA_HI     = $50
-ENTB_HI     = $60
-IOBUF1      = $7000
-IOBUF2      = $7400
-DIRBLK      = $7C00
+ENTA_HI     = $5C
+ENTB_HI     = $6C
+IOBUF1      = $7C00
+IOBUF2      = $1400
+DIRBLK      = $1800
 COPYBUF     = $8000
 COPYLEN     = $3C00
 VIEWLEN     = $0800
@@ -94,6 +94,10 @@ ERR_LONG    = $E5
 ERR_NOVOL   = $E6
 ERR_NOBS    = $E7
 ERR_BOOT    = $E8
+ERR_KFOLDER = $E9
+ERR_KDST    = $EA
+ERR_KMOUNT  = $EB
+ERR_KPROT   = $EC
 
 ;--------------------------------------------------------------------
 ; Macros
@@ -252,6 +256,10 @@ pidx:   .res 1
 plen1:  .res 1
 fhdr:   .res 8
 bidx:   .res 2
+kegs:   .res 1          ; 1 = running in KEGS (see "KEGS disk images")
+kprot:  .res 1          ; drive YANC runs from (slot*16 + drive)
+pmode:  .res 2          ; per panel: 0 ProDOS, 1 KEGS disk images
+ksel:   .res 1
 
 ;====================================================================
         .code
@@ -309,6 +317,7 @@ start:
         sta startdir,x
         dex
         bpl :-
+        jsr kdetect             ; running in KEGS?
         ; right panel = first other volume
         stz pn
         jsr getvolname
@@ -353,7 +362,10 @@ main_key:
         sta oldcur
         lda ptop,x
         sta oldtop
-        ldy #0
+        jsr iskegs
+        beq :+
+        jmp kmain_key           ; KEGS disk images panel
+:       ldy #0
 @l:     lda keytab,y
         beq @other
         cmp key
@@ -481,8 +493,7 @@ k_search:
         stz cnt
         lda #0
 :       jsr lentptr
-        ldy #1
-        lda (ep),y
+        jsr firstch
         cmp key
         beq @f
         inc tmp2
@@ -689,6 +700,10 @@ k_swap: ldx #64
         sta path0,x
         dex
         bpl @l
+        lda pmode
+        ldx pmode+1
+        sta pmode+1
+        stx pmode
         stz pn
         jsr loaddir
         lda #1
@@ -765,13 +780,16 @@ k_vol:  jsr scanvols
         lda vn
         clc
         adc #7
-        sta bb
+        ldx kegs
+        beq :+
+        adc #2                  ; + "KEGS disk images..."
+:       sta bb
         lda #<t_vol
         ldy #>t_vol
         jsr box
 @draw:  ldx #0
 @e:     cpx vn
-        beq @k
+        beq @kitem
         phx
         txa
         clc
@@ -829,6 +847,28 @@ k_vol:  jsr scanvols
 :       stz attr
         inx
         bra @e
+@kitem: lda kegs
+        beq @k
+        lda vn
+        clc
+        adc #7
+        tay
+        ldx #22
+        jsr gotoxy
+        stz attr
+        lda vsel
+        cmp vn
+        bne :+
+        lda #$80
+        sta attr
+:       PRINT s_kitem
+@kp:    lda cx
+        cmp #58
+        bcs :+
+        lda #' '
+        jsr putc
+        bra @kp
+:       stz attr
 @k:     jsr getkey
         cmp #$0A
         beq @dn
@@ -846,17 +886,30 @@ k_vol:  jsr scanvols
 @dn:    lda vsel
         inc a
         cmp vn
-        bcs @k
-        sta vsel
+        bcc @dnok
+        bne @k
+        ldx kegs                ; one more row: KEGS disk images
+        beq @k
+@dnok:  sta vsel
         jmp @draw
 @up:    lda vsel
         beq @k
         dec vsel
         jmp @draw
-@ch:    ldx vsel
-        ldy vl,x
-        lda cp
+@ch:    lda cp
         sta pn
+        tax
+        lda vsel
+        cmp vn
+        bne @chv
+        lda #1                  ; KEGS disk images
+        sta pmode,x
+        jsr kroot
+        jsr loaddir
+        jmp main_redraw
+@chv:   stz pmode,x
+        ldx vsel
+        ldy vl,x
         jsr setvol
         jsr loaddir
         jmp main_redraw
@@ -865,6 +918,7 @@ k_vol:  jsr scanvols
 ; Copy (5)
 ;--------------------------------------------------------------------
 k_copy: stz moveflag
+        jsr kchkdst
         jsr selcount
         lda nsel
         bne :+
@@ -3125,7 +3179,10 @@ fixtop: ldx pn
 
 ; read directory of panel pn
 loaddir:
-        ldx pn
+        jsr iskegs
+        beq :+
+        jmp kloaddir
+:       ldx pn
         stz pcount,x
         stz ptop,x
         stz pcur,x
@@ -3255,7 +3312,10 @@ sortpanel:
         sta idxtab,x
         iny
         bra @id
-@sort:  lda sn
+@sort:  ldx pn
+        lda pmode,x             ; KEGS panels come sorted
+        bne @done
+        lda sn
         cmp #2
         bcc @done
         lda #1
@@ -3403,7 +3463,12 @@ drawpanel:
         inx
         ldy #1
         jsr gotoxy
-        PRINT s_hdr
+        jsr iskegs
+        beq @ph
+        PRINT s_khdr
+        bra @phd
+@ph:    PRINT s_hdr
+@phd:
         ldx px
         inx
         ldy #19
@@ -3478,6 +3543,10 @@ drawtitle:
 
 drawfree:
         jsr setpx
+        jsr iskegs
+        beq :+
+        jmp kfree
+:
         lda px
         clc
         adc #6
@@ -3549,7 +3618,10 @@ drawfrow:
         bne @nc
         lda #$80
         sta attr
-@nc:    ldy #E_TAG
+@nc:    jsr iskegs
+        beq :+
+        jmp kdrawrow
+:       ldy #E_TAG
         lda (ep),y
         beq @nt
         lda attr
@@ -3681,7 +3753,10 @@ drawinfo:
         jsr prdec
         PRINT s_tagged
         jmp fillrest
-@cur:   lda pcount,x
+@cur:   jsr iskegs
+        beq :+
+        jmp kinfo
+:       lda pcount,x
         beq fillrest
         lda pcur,x
         jsr lentptr
@@ -3757,7 +3832,12 @@ drawprompt:
 @d:     rts
 
 drawkeys:
-        GOTO 0,23
+        SETPTR ttl, keylab
+        ldx cp
+        lda pmode,x
+        beq :+
+        SETPTR ttl, kkeylab
+:       GOTO 0,23
         ldx #0
 @l:     stz attr
         cpx #9
@@ -3781,7 +3861,7 @@ drawkeys:
         tay
         lda #6
         sta tmp2
-@c:     lda keylab,y
+@c:     lda (ttl),y
         jsr putc
         iny
         dec tmp2
@@ -4287,6 +4367,732 @@ getkey: lda KBD
         rts
 
 ;====================================================================
+; KEGS disk images (only when running in the KEGS emulator)
+;
+; KEGS (github.com/udiweinstein/kegs) lets programs list the disk
+; images in the host's disk images folder and insert / eject them.
+; The call is the 3 bytes $42,$58,$EA with A = command and X/Y =
+; parameter block.  On a real 65C02 / 65816 those bytes are a 2-byte
+; NOP and a NOP, so YANC just doesn't see KEGS there.
+; A panel in "KEGS mode" (pmode,x = 1) shows the images; its path is
+; "KEGS:/" or "KEGS:/SUBFOLDER".  Entries use KEGS's 32-byte layout:
+; +0 kind (1 folder, 2 image, 3 = ".."), +1 drive it is in ($61 =
+; slot 6 drive 1), +2,+3 size in KB, +4 name length, +5.. name.
+;====================================================================
+K_ID        = 0
+K_LIST      = 1
+K_MOUNT     = 2
+K_EJECT     = 3
+K_DRIVES    = 4
+KROOTLEN    = 6                 ; "KEGS:/"
+KDRVBUF     = COPYBUF           ; DRIVES result (12 x 32 bytes)
+KLISTBUF    = COPYBUF+$1000     ; scratch LIST before MOUNT
+KNOPTS      = 9                 ; Auto + 8 drives in the insert box
+
+.macro KEGSCALL cmd
+        lda #cmd
+        ldx #<kblk
+        ldy #>kblk
+        .byte $42, $58, $EA
+.endmacro
+
+; At start: is KEGS there?  Also find the drive YANC runs from (kprot)
+kdetect:
+        stz kegs
+        stz kprot
+        lda #K_ID
+        .byte $42, $58, $EA
+        cmp #'K'
+        bne @r
+        lda #1
+        sta kegs
+        ; volume of the start directory (path0 holds it now) -> unit
+        stz pn
+        jsr getvolname
+        ldx #0
+@v:     cpx vn
+        beq @r
+        ldy vl,x
+        jsr cmpvol
+        beq @f
+        inx
+        bra @v
+@f:     ldy vl,x
+        lda onbuf,y             ; DSSS0000 -> slot*16 + drive (1..2)
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        and #7
+        asl a
+        asl a
+        asl a
+        asl a
+        sta kprot
+        lda onbuf,y
+        asl a                   ; C = D
+        lda #1
+        adc #0
+        ora kprot
+        sta kprot
+@r:     rts
+
+; Z=0 (A=1) if panel pn is in KEGS mode
+iskegs: ldx pn
+        lda pmode,x
+        rts
+
+; path(pn) = "KEGS:/"
+kroot:  jsr pathptr
+        ldy #KROOTLEN
+:       lda s_kroot-1,y
+        sta (ptr),y
+        dey
+        bne :-
+        lda #KROOTLEN
+        sta (ptr)
+        rts
+
+; sub-folder of path(pn) -> kblk+3 (length) and kblk+4..
+ksetsub:
+        jsr pathptr
+        lda (ptr)
+        sec
+        sbc #KROOTLEN
+        bcs :+
+        lda #0
+:       sta kblk+3
+        ldx #0
+        ldy #KROOTLEN+1
+@c:     cpx kblk+3
+        beq @d
+        lda (ptr),y
+        sta kblk+4,x
+        iny
+        inx
+        bra @c
+@d:     rts
+
+; 1 if panel pn shows a sub-folder (so entry 0 is "..")
+khasup: jsr pathptr
+        lda (ptr)
+        cmp #KROOTLEN+1
+        lda #0
+        rol a
+        rts
+
+; read the disk images of panel pn
+kloaddir:
+        ldx pn
+        stz pcount,x
+        stz ptop,x
+        stz pcur,x
+        stz pntag,x
+        jsr ksetsub
+        jsr khasup
+        beq @noup
+        lda #0
+        jsr entptr
+        ldy #31
+        lda #0
+:       sta (ep),y
+        dey
+        bpl :-
+        lda #3
+        sta (ep)
+        ldy #4
+        lda #2
+        sta (ep),y
+        lda #'.'
+        iny
+        sta (ep),y
+        iny
+        sta (ep),y
+        ldx pn
+        inc pcount,x
+@noup:  ldx pn
+        lda pcount,x
+        jsr entptr
+        lda ep
+        sta kblk
+        lda ep+1
+        sta kblk+1
+        ldx pn
+        lda #MAXENT
+        sec
+        sbc pcount,x
+        sta kblk+2
+        KEGSCALL K_LIST
+        bcs @err
+        ldx pn
+        clc
+        adc pcount,x
+        sta pcount,x
+        jmp sortpanel           ; (KEGS panels: identity order only)
+@err:   lda #ERR_KFOLDER
+        jsr showerr
+        jmp sortpanel
+
+; keys in a KEGS panel
+kmain_key:
+        ldy #0
+@l:     lda ktab,y
+        beq @other
+        cmp key
+        beq @hit
+        iny
+        bra @l
+@hit:   tya
+        asl a
+        tax
+        jmp (kjmp,x)
+@other: lda key
+        cmp #'a'
+        bcc @u
+        cmp #'z'+1
+        bcs @u
+        and #$DF
+@u:     cmp #'A'
+        bcc @no
+        cmp #'Z'+1
+        bcs @no
+        sta key
+        jmp k_search
+@no:    jmp main_key
+
+ktab:   .byte $0A,$0B,$08,$15,$09,$0D,$1B,$7F,'1','2','8','0',$12,$13,0
+kjmp:   .word k_down,k_up,k_pgup,k_pgdn,k_tab,k_kenter,k_kparent,k_kparent
+        .word k_help,k_vol,k_keject,k_quit,k_reread,k_swap
+
+; first letter of the entry at ep, upper case (for A..Z search)
+firstch:
+        jsr iskegs
+        bne @k
+        ldy #1
+        lda (ep),y
+        rts
+@k:     ldy #5
+        lda (ep),y
+        cmp #'a'
+        bcc :+
+        cmp #'z'+1
+        bcs :+
+        and #$DF
+:       rts
+
+; Return: folder -> enter it, ".." -> parent, image -> insert box
+k_kenter:
+        ldx pn
+        lda pcount,x
+        bne :+
+        jmp main_key
+:       lda pcur,x
+        jsr lentptr
+        lda (ep)
+        cmp #3
+        beq k_kparent
+        cmp #1
+        beq @dir
+        jmp kinsert
+@dir:   jsr pathptr
+        lda (ptr)
+        sta tmp
+        ldy #4
+        lda (ep),y
+        sta tmp2
+        sec
+        adc tmp                 ; path + "/" + name
+        cmp #64
+        bcs @long
+        ldy tmp
+        lda tmp
+        cmp #KROOTLEN
+        beq @nos                ; "KEGS:/" already ends with '/'
+        iny
+        lda #'/'
+        sta (ptr),y
+@nos:   ldx #0
+@n:     phy
+        txa
+        clc
+        adc #5
+        tay
+        lda (ep),y
+        ply
+        iny
+        sta (ptr),y
+        inx
+        cpx tmp2
+        bne @n
+        tya
+        sta (ptr)
+        jsr loaddir
+        jmp main_redraw
+@long:  lda #ERR_LONG
+        jsr showerr
+        jmp main_redraw
+
+; Esc / Delete: parent folder, cursor on the folder we came from
+k_kparent:
+        jsr pathptr
+        lda (ptr)
+        cmp #KROOTLEN+1
+        bcs :+
+        jmp main_key
+:       tay
+@l:     lda (ptr),y
+        cmp #'/'
+        beq @f
+        dey
+        bra @l
+@f:     sty tmp                 ; kname = part after the last '/'
+        lda (ptr)
+        sec
+        sbc tmp
+        sta kname
+        ldx #0
+@c:     iny
+        lda (ptr),y
+        sta kname+1,x
+        inx
+        cpx kname
+        bne @c
+        ldy tmp
+        cpy #KROOTLEN
+        beq :+
+        dey                     ; drop the '/' (keep it after "KEGS:")
+:       tya
+        sta (ptr)
+        jsr loaddir
+        stz cnt                 ; find kname
+@s:     ldx pn
+        lda cnt
+        cmp pcount,x
+        bcs @d
+        jsr lentptr
+        ldy #4
+        lda (ep),y
+        cmp kname
+        bne @nx
+        tax
+@cc:    txa
+        clc
+        adc #4
+        tay
+        lda (ep),y
+        cmp kname,x
+        bne @nx
+        dex
+        bne @cc
+        ldx pn
+        lda cnt
+        sta pcur,x
+        jsr fixtop
+        bra @d
+@nx:    inc cnt
+        bra @s
+@d:     jmp main_redraw
+
+; KEGS's entry number of the cursor entry (minus the ".." row) -> A
+kapiidx:
+        jsr khasup
+        sta tmp
+        ldx pn
+        lda pcur,x
+        sec
+        sbc tmp
+        rts
+
+; Return on an image: choose the drive and insert it
+kinsert:
+        lda #<KDRVBUF
+        sta kblk
+        lda #>KDRVBUF
+        sta kblk+1
+        KEGSCALL K_DRIVES
+        stz ksel
+        lda #18
+        sta bl
+        lda #61
+        sta br
+        lda #5
+        sta bt
+        lda #19
+        sta bb
+        lda #<t_insert
+        ldy #>t_insert
+        jsr box
+        GOTO 21,6               ; image name
+        jsr kname27
+@draw:  ldx #0
+@o:     phx
+        txa
+        clc
+        adc #8
+        tay
+        ldx #20
+        jsr gotoxy
+        plx
+        stz attr
+        cpx ksel
+        bne :+
+        lda #$80
+        sta attr
+:       lda #' '
+        jsr putc
+        cpx #0
+        bne @drv
+        PRINT s_kauto
+        bra @pad
+@drv:   jsr kdrvent             ; ptr2 = DRIVES entry of option X
+        lda (ptr2)
+        jsr prdrive
+        lda #' '
+        jsr putc
+        jsr putc
+        lda (ptr2)
+        cmp kprot
+        bne :+
+        PRINT s_kyanc
+        bra @pad
+:       ldy #1
+        lda (ptr2),y
+        bne :+
+        PRINT s_kempty
+        bra @pad
+:       lda ptr2
+        sta ptr
+        lda ptr2+1
+        sta ptr+1
+        lda #30
+        jsr knamep              ; name at (ptr)+4, at most 30 chars
+@pad:   lda cx
+        cmp #59
+        bcs :+
+        lda #' '
+        jsr putc
+        bra @pad
+:       stz attr
+        inx
+        cpx #KNOPTS
+        bne @o
+        GOTO 21,18
+        PRINT s_kins
+@k:     jsr getkey
+        cmp #$0A
+        beq @dn
+        cmp #$15
+        beq @dn
+        cmp #$0B
+        beq @up
+        cmp #$08
+        beq @up
+        cmp #$0D
+        beq @go
+        cmp #$1B
+        bne @k
+        jmp main_redraw
+@dn:    lda ksel
+@dn2:   inc a
+        cmp #KNOPTS
+        bcs @k
+        jsr kprotopt
+        beq @dn2
+        sta ksel
+        jmp @draw
+@up:    lda ksel
+@up2:   dec a
+        bmi @k
+        jsr kprotopt
+        beq @up2
+        sta ksel
+        jmp @draw
+@go:    ; LIST again (another panel may have listed meanwhile), then MOUNT
+        jsr ksetsub
+        lda #<KLISTBUF
+        sta kblk
+        lda #>KLISTBUF
+        sta kblk+1
+        lda #MAXENT
+        sta kblk+2
+        KEGSCALL K_LIST
+        jsr kapiidx
+        sta kblk
+        stz kblk+1
+        lda ksel
+        beq :+
+        tax
+        jsr kdrvent
+        lda (ptr2)
+        sta kblk+1
+:       lda kprot
+        sta kblk+2
+        KEGSCALL K_MOUNT
+        bcc kdone
+        lda #ERR_KMOUNT
+        jsr showerr
+kdone:  jsr reloadboth
+        jmp main_redraw
+
+; Z=1 if option A is the drive YANC runs from (keeps A)
+kprotopt:
+        pha
+        cmp #0
+        beq @n
+        tax
+        jsr kdrvent
+        lda (ptr2)
+        cmp kprot
+        beq @y
+@n:     pla
+        ldx #1                  ; Z=0
+        rts
+@y:     pla
+        ldx #0                  ; Z=1
+        rts
+
+; ptr2 = DRIVES entry for insert option X (1..8)
+kdrvent:
+        lda kdrvmap,x
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a
+        clc
+        adc #<KDRVBUF
+        sta ptr2
+        lda #>KDRVBUF
+        adc #0
+        sta ptr2+1
+        rts
+kdrvmap:.byte 0, 2, 3, 0, 1, 4, 5, 6, 7     ; S6D1 S6D2 S5D1 S5D2 S7D1-4
+
+; 8: eject the image under the cursor
+k_keject:
+        ldx pn
+        lda pcount,x
+        bne :+
+@no:    jmp main_key
+:       lda pcur,x
+        jsr lentptr
+        lda (ep)
+        cmp #2
+        bne @no
+        ldy #1
+        lda (ep),y
+        beq @no                 ; not in a drive
+        cmp kprot
+        bne :+
+        lda #ERR_KPROT
+        jsr showerr
+        jmp main_redraw
+:       sta kblk+1
+        lda #<t_eject
+        ldy #>t_eject
+        jsr dlgbox
+        GOTO 14,9
+        PRINT s_keject
+        GOTO 14,10
+        jsr kname27
+        GOTO 14,11
+        PRINT s_kfrom
+        ldy #1
+        lda (ep),y
+        jsr prdrive
+        GOTO 14,13
+        PRINT s_yn
+        jsr yesno
+        bcs :+
+        jmp main_redraw
+:       KEGSCALL K_EJECT
+        jmp kdone
+
+; print the name of entry ep (at most 27 chars)
+kname27:
+        lda ep
+        sta ptr
+        lda ep+1
+        sta ptr+1
+        lda #27
+; print the name at (ptr)+4 (length) / +5.., at most A chars
+knamep: sta tmp2
+        ldy #4
+        lda (ptr),y
+        cmp tmp2
+        bcc :+
+        lda tmp2
+:       sta tmp
+        beq @d
+        ldy #5
+@l:     lda (ptr),y
+        jsr putc
+        iny
+        dec tmp
+        bne @l
+@d:     rts
+
+; print drive A (slot*16 + drive) as "S6,D1"
+prdrive:
+        pha
+        lda #'S'
+        jsr putc
+        pla
+        pha
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        ora #'0'
+        jsr putc
+        lda #','
+        jsr putc
+        lda #'D'
+        jsr putc
+        pla
+        and #$0F
+        ora #'0'
+        jmp putc
+
+; a row of a KEGS panel (entry ep): name, size, drive
+kdrawrow:
+        lda #' '
+        jsr putc
+        lda ep
+        sta ptr
+        lda ep+1
+        sta ptr+1
+        lda cx
+        clc
+        adc #22                 ; column where the size starts
+        pha
+        lda #21
+        jsr knamep
+        pla
+        sta dtmp
+@sp:    lda cx
+        cmp dtmp
+        bcs :+
+        lda #' '
+        jsr putc
+        bra @sp
+:       lda (ep)
+        cmp #2
+        beq @img
+        cmp #1
+        beq @dir
+        PRINT s_kup
+        bra @end
+@dir:   PRINT s_kdir
+        bra @end
+@img:   jsr ksize
+        lda #' '
+        jsr putc
+        ldy #1
+        lda (ep),y
+        beq @end
+        jsr prdrive
+@end:   jmp kfill
+
+; size of entry ep: "  140K", " 32M" for 10 MB or more
+ksize:  ldy #2
+        lda (ep),y
+        sta num
+        iny
+        lda (ep),y
+        sta num+1
+        stz num+2
+        cmp #>10240
+        bcc @k
+        ldx #10                 ; KB -> MB
+:       lsr num+1
+        ror num
+        dex
+        bne :-
+        jsr num2str
+        lda #5
+        jsr prnum
+        lda #'M'
+        jmp putc
+@k:     jsr num2str
+        lda #5
+        jsr prnum
+        lda #'K'
+        jmp putc
+
+; fill the rest of the panel row with spaces
+kfill:  lda cx
+        sec
+        sbc px
+        cmp #39
+        bcs @d
+        lda #' '
+        jsr putc
+        bra kfill
+@d:     stz attr
+        rts
+
+; info line of a KEGS panel
+kinfo:  lda pcount,x
+        bne :+
+        jmp fillrest
+:       lda pcur,x
+        jsr lentptr
+        lda #' '
+        jsr putc
+        lda ep
+        sta ptr
+        lda ep+1
+        sta ptr+1
+        lda #20
+        jsr knamep
+@sp:    lda cx
+        sec
+        sbc px
+        cmp #22
+        bcs :+
+        lda #' '
+        jsr putc
+        bra @sp
+:       lda (ep)
+        cmp #2
+        bne @d
+        jsr ksize
+        ldy #1
+        lda (ep),y
+        beq @d
+        PRINT s_kin
+        ldy #1
+        lda (ep),y
+        jsr prdrive
+@d:     jmp fillrest
+
+; bottom line of a KEGS panel (instead of free blocks)
+kfree:  lda px
+        clc
+        adc #6
+        tax
+        ldy #21
+        jsr gotoxy
+        stz attr
+        PRINT s_kfoot
+        rts
+
+; Copy to a KEGS panel is not possible: show why and go back
+kchkdst:
+        lda cp
+        eor #1
+        tax
+        lda pmode,x
+        bne :+
+        rts
+:       pla
+        pla
+        lda #ERR_KDST
+        jsr showerr
+        jmp main_redraw
+
+;====================================================================
 ; Data
 ;====================================================================
         .rodata
@@ -4326,6 +5132,22 @@ typtab: .byte $00,"   "
 NTYPES = (* - typtab) / 4
 
 keylab: .byte "Help  Vol   View  Lock  Copy  RenMovMkdir DeleteSort  Quit  "
+kkeylab:.byte "Help  Vol                                 Eject       Quit  "
+s_khdr:   .byte " Name                    Size Drive   ", 0
+s_kroot:  .byte "KEGS:/"
+s_kup:    .byte "  <UP>", 0
+s_kdir:   .byte " <DIR>", 0
+s_kauto:  .byte "Auto (by disk type)", 0
+s_kyanc:  .byte "(YANC runs from here)", 0
+s_kempty: .byte "(empty)", 0
+s_kins:   .byte "Enter=Insert   Esc=Cancel", 0
+s_keject: .byte "Eject", 0
+s_kfrom:  .byte "from drive ", 0
+s_kin:    .byte " in ", 0
+s_kfoot:  .byte " Enter=Insert  8=Eject  Esc=Up ", 0
+s_kitem:  .byte " KEGS disk images...", 0
+t_insert: .byte "Insert disk", 0
+t_eject:  .byte "Eject disk", 0
 
 s_hdr:    .byte " Name", "            ", "Typ", " ", " Blks", " ", "Modified", "   ", 0
 s_uprow:  .byte "   ", " ", " <UP>", " ", "         ", "  ", 0
@@ -4439,6 +5261,14 @@ errtab: .byte $27
         .word ee7
         .byte ERR_BOOT
         .word ee8
+        .byte ERR_KFOLDER
+        .word ee9
+        .byte ERR_KDST
+        .word eea
+        .byte ERR_KMOUNT
+        .word eeb
+        .byte ERR_KPROT
+        .word eec
         .byte 0
 
 e27:    .byte "I/O error", 0
@@ -4472,18 +5302,22 @@ ee5:    .byte "Pathname too long", 0
 ee6:    .byte "No volumes online", 0
 ee7:    .byte "BASIC.SYSTEM not found", 0
 ee8:    .byte "Boot: pick a *.SYSTEM file in the volume root", 0
+ee9:    .byte "KEGS disk images folder not found (F4)", 0
+eea:    .byte "Not possible: other panel is KEGS images", 0
+eeb:    .byte "KEGS could not insert that disk image", 0
+eec:    .byte "YANC is running from that drive", 0
 
 helptab:
         .word h1,h0,h2,h3,h4,h5,h6,h7,h0,h9,h10,h11,h11b,h12,h13,h14,h15,h16,h17
         .word 0
 h0:     .byte 0
-h1:     .byte "YANC v1.2 - Yet Another Norton Commander for the Apple IIc", 0
+h1:     .byte "YANC v1.3 - Yet Another Norton Commander for the Apple IIc", 0
 h2:     .byte "Up/Down      Move cursor          ",1,"-Up/",1,"-Down  First / last", 0
 h3:     .byte "Left/Right   Page up / down       Tab            Switch panel", 0
 h4:     .byte "Return       Enter dir / run file Esc/Delete     Parent directory", 0
 h5:     .byte "Space        Tag / untag          A..Z           Jump to name", 0
 h6:     .byte "+  -  *      Tag all/none/invert  Ctrl-R         Re-read disks", 0
-h7:     .byte "Ctrl-S       Swap panels", 0
+h7:     .byte "Ctrl-S       Swap panels          2 > KEGS disk images (in KEGS)", 0
 h9:     .byte "1 Help       2 Choose volume      3 View (text / hex)  4 Lock", 0
 h10:    .byte "5 Copy       6 Rename / Move      7 Make directory", 0
 h11:    .byte "8 Delete     9 Sort name/type     0 Quit     * locked + forked", 0
@@ -4573,3 +5407,5 @@ crtp:     .byte 7               ; CREATE of a temporary file (path in inbuf)
           .word 0, 0
 tdesp:    .byte 1
           .word inbuf
+kname:    .res 28               ; KEGS: folder name to find after "up"
+kblk:     .res 68               ; KEGS call parameter block
