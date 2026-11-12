@@ -63,8 +63,8 @@ Locked files are shown with `*` after the name, like `CATALOG`.
 When YANC runs in [KEGS](https://github.com/udiweinstein/kegs), the `2` Vol box has one more line,
 *KEGS disk images...*. It turns the panel into a list of the disk images in KEGS's disk images folder
 (set in KEGS's F4 menu), with each image's size and the drive it is in.
-Return on a folder opens it; Return on an image asks for the drive (*Auto* picks S6 for 5.25", S5 for 3.5",
-S7 for hard disks) and inserts it. `8` ejects. The drive YANC itself runs from is never touched.
+Return on a folder opens it; Return on an image offers only the drives that fit it (S6 for 5.25", S5 for 3.5",
+S7 for hard disks), inserts it and opens the disk in the panel. `8` ejects. The drive YANC itself runs from is never touched.
 On a real Apple II nothing changes: YANC checks for KEGS with an instruction that a real 65C02 ignores.
 Copy keeps file type, aux type, access and dates. Directories are not copied recursively.
 
