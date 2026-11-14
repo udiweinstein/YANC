@@ -126,5 +126,16 @@ check(fl == ['/FILLER'] and PVol(vols2['TINY']['img']).nfree() == t0, 'disk full
 goto('ICON'); e.run(list('5y'))
 ok_ext(vols2['TINY']['img'], '/TINY/ICON', *files['ICON'], 'after disk full, a smaller copy works')
 fsck('TINY')
+# 9. a storage type that is neither plain nor extended (4 = Pascal area):
+#    DESTROY fails like for an extended file, but YANC must leave it alone
+img9 = mkgs(); v = PVol(img9); dk, o, err = v.lookup(['PLAIN'])
+img9[o] = 0x40 | (img9[o] & 0x0F)
+vols = {'GS': dict(unit=0x50, img=img9), 'HD': dict(unit=0x70, img=blank('HD', 4000))}
+e = ImgEmu(BIN, vols, '/GS/')
+snap = bytes(img9)
+e.run([]); goto('PLAIN'); e.run(list('8y'))
+check(screen_has('Unsupported storage type'), 'storage type 4: delete refused')
+e.run([' '])
+check(bytes(img9) == snap, 'storage type 4: disk not touched')
 e.show('end')
 print('\nFAILED:', fails if fails else 'none')

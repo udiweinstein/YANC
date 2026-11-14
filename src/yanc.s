@@ -1778,7 +1778,14 @@ delext: lda despath
         sta xpath+1
         jsr xfind
         bcs @r
-        ldy #$1E
+        lda (ptr2)              ; only storage type 5 (extended) is handled
+        and #$F0                ; here; anything else (Pascal area, damaged
+        cmp #$50                ; entry) must not be freed as if it had forks
+        beq :+
+        lda #$4B                ; unsupported storage type
+        sec
+        rts
+:       ldy #$1E
         lda (ptr2),y
         bmi :+
         lda #$4E                ; locked
