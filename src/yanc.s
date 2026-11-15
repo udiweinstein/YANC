@@ -726,8 +726,20 @@ k_quit: jsr dlgbox_q
         GOTO 14,13
         PRINT s_yn
         jsr yesno
-        bcs quitnow
+        bcs :+
         jmp main_redraw
+:       ; to BASIC, if BASIC.SYSTEM is in the directory YANC started from
+        ldy #12
+:       lda s_bs,y
+        sta selname,y
+        dey
+        bpl :-
+        SETPTR ptr, startdir
+        jsr trybs
+        bcs quitnow
+        stz lmode
+        SETPTR ptr, startdir            ; prefix: BASIC runs STARTUP from there
+        jmp launchp
 quitnow:
         jsr cls
         stz closeref
@@ -2835,6 +2847,7 @@ trybs:  SETPTR ptr2, fp2
 
 ; load fp2 at $2000 and run it (lmode=1: pass fp1 as startup path)
 launch: jsr pathptr                     ; prefix = directory of the file
+launchp:                                ; (or the directory at ptr)
         lda ptr
         sta pfxsp
         lda ptr+1

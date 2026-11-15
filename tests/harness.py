@@ -178,7 +178,7 @@ class Emu:
         m = self.meta.get(h)
         if m is None:
             ext = os.path.splitext(h)[1].upper()
-            t = {'.TXT': 4, '.SYS': 0xFF, '.BAS': 0xFC}.get(ext, 6)
+            t = {'.TXT': 4, '.SYS': 0xFF, '.SYSTEM': 0xFF, '.BAS': 0xFC}.get(ext, 6)
             if os.path.isdir(h): t = 0x0F
             m = dict(type=t, aux=0x2000 if t == 6 else 0, access=0xC3, cdate=DATE, ctime=TIME, mdate=DATE, mtime=TIME)
             self.meta[h] = m

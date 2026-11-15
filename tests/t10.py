@@ -114,4 +114,33 @@ e = emu(kegs=True)
 e.run([TAB, '2', DN, DN, DN, RET, ESC])
 check('/HARD1' in e.screen()[0] and 'KEGS:' not in e.screen()[0], 'right panel has its own saved directory')
 
+# ---- 4. Quit (0): to BASIC.SYSTEM when it is in the directory YANC started from
+BASIC = bytes([0x20, 0x00, 0xBF, 0x65, 0x06, 0x20, 0x04, 0, 0, 0, 0, 0, 0])   # JSR MLI / QUIT
+def with_basic(vols):
+    open(os.path.join(vols['SYSDISK']['path'], 'BASIC.SYSTEM'), 'wb').write(BASIC)
+def opens(e): return [c for c in e.mlilog if c[0] == 0xC8]
+e = emu(tweak=with_basic)
+e.run([TAB, '0']); n0 = len(opens(e))
+check('Do you want to quit YANC?' in scr(e), 'Quit still asks first')
+e.run(['y'])
+check(bytes(e.mem.m[0x2000:0x2000 + len(BASIC)]) == BASIC and e.quit, 'Quit loads and runs BASIC.SYSTEM')
+check(e.prefix == '/SYSDISK/', 'prefix is the start directory, not the active panel (/HARD1): %r' % e.prefix)
+check(bytes(e.mem.m[0x281:0x281 + e.mem.m[0x280]]) == b'/SYSDISK/BASIC.SYSTEM', '$280 names BASIC.SYSTEM')
+check(not e.store80, '40-column text screen for BASIC')
+e = emu(tweak=with_basic, kegs=True)
+e.run(['2', DN, DN, DN, RET, '0', 'y'])
+check(bytes(e.mem.m[0x2000:0x2000 + len(BASIC)]) == BASIC and e.prefix == '/SYSDISK/',
+      'Quit from a KEGS panel: BASIC.SYSTEM, prefix /SYSDISK/: %r' % e.prefix)
+e = emu()
+e.run(['0']); n0 = len(opens(e)); e.run(['y'])
+check(e.quit and len(opens(e)) == n0,
+      'no BASIC.SYSTEM: ProDOS QUIT as before')
+e = emu(tweak=with_basic)
+e.run(['0', 'n'])
+check(not e.quit and '/SYSDISK' in e.screen()[0], 'N: stays in YANC')
+e = emu(tweak=with_basic)
+e.meta[os.path.join(e.vols['SYSDISK']['path'], 'BASIC.SYSTEM')] = dict(type=0x04, aux=0, access=0xE3, cdate=0, ctime=0, mdate=0, mtime=0)
+e.run(['0']); n0 = len(opens(e)); e.run(['y'])
+check(e.quit and len(opens(e)) == n0, 'a BASIC.SYSTEM that is not a SYS file is not run')
+
 print('FAILED:', fails or 'none')
