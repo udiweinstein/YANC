@@ -80,4 +80,38 @@ check(any(FOOT in l for l in L[:23]) and '1Help' in L[23], 'full box: footer sho
 e.run([DN] * 14 + [RET])
 check('KEGS:/' in e.screen()[0], 'full box: last row reachable')
 
+# ---- 3. KEGS disk images: Esc at the top folder goes back to the ProDOS directory
+def kegslist(extra=()):
+    e = emu(kegs=True)
+    e.run(['G', RET])                       # left panel: /SYSDISK/GAMES
+    e.run(['2', DN, DN, DN, RET] + list(extra))
+    return e
+e = kegslist()
+check('KEGS:/' in e.screen()[0] and 'Eject' in e.screen()[23], '(setup) panel shows the KEGS list')
+e.run([ESC])
+check('/SYSDISK/GAMES' in e.screen()[0] and 'KEGS:' not in e.screen()[0], 'Esc at KEGS:/ returns to /SYSDISK/GAMES')
+check('ZORK' in scr(e) and 'Karateka.dsk' not in scr(e), 'the ProDOS files are listed again')
+check('5Copy' in e.screen()[23] and 'Eject' not in e.screen()[23], 'normal key bar is back')
+e.run([ESC])
+check('/SYSDISK' in e.screen()[0] and 'GAMES' not in e.screen()[0], 'Esc again: parent directory, as in any ProDOS panel')
+e = kegslist(['G', RET])                    # into the GAMES sub-folder of the images
+check('KEGS:/GAMES' in e.screen()[0], '(setup) in an images sub-folder')
+e.run([ESC])
+check('KEGS:/' in e.screen()[0] and 'KEGS:/GAMES' not in e.screen()[0], 'Esc in a sub-folder goes up one level first')
+e.run([ESC])
+check('/SYSDISK/GAMES' in e.screen()[0], 'then back to the ProDOS directory')
+e = kegslist(['2', DN, DN, DN, RET, ESC])   # choosing the list twice keeps the first saved directory
+check('/SYSDISK/GAMES' in e.screen()[0], 'opening the list again from the list still returns to ProDOS')
+e = kegslist(['\x7f'])
+check('/SYSDISK/GAMES' in e.screen()[0], 'Delete works like Esc')
+e = emu('/HARD1/DOCS/', kegs=True)
+e.run(['2', DN, DN, DN, RET])
+shutil.rmtree(os.path.join(e.vols['HARD1']['path'], 'DOCS'))
+e.run([ESC])
+check('/SYSDISK' in e.screen()[0] and 'KEGS:' not in e.screen()[0] and 'YANC.SYSTEM' in scr(e),
+      'saved directory gone: first volume instead')
+e = emu(kegs=True)
+e.run([TAB, '2', DN, DN, DN, RET, ESC])
+check('/HARD1' in e.screen()[0] and 'KEGS:' not in e.screen()[0], 'right panel has its own saved directory')
+
 print('FAILED:', fails or 'none')

@@ -55,6 +55,7 @@ P_QUIT      = $65
 ;   $1000-$12FF  program loader (copied there when launching)
 ;   $1400-$17FF  ProDOS I/O buffer 2
 ;   $1800-$19FF  directory block buffer
+;   $1A00-$1A81  KEGS: the panels' ProDOS paths while they show disk images
 ;   $2000-$5BFF  code + data
 ;   $5C00-$6BFF  left panel entries  (128 x 32 bytes)
 ;   $6C00-$7BFF  right panel entries
@@ -941,7 +942,11 @@ k_vol:  jsr scanvols
         lda vsel
         cmp vtot
         bne @chv
-        lda #1                  ; KEGS disk images
+        lda pmode,x             ; KEGS disk images
+        bne :+                  ; (already there: keep the saved directory)
+        jsr ksavepath
+        ldx pn
+:       lda #1
         sta pmode,x
         jsr kroot
         jsr loaddir
@@ -4512,6 +4517,7 @@ K_MOUNT     = 2
 K_EJECT     = 3
 K_DRIVES    = 4
 KROOTLEN    = 6                 ; "KEGS:/"
+KSAVE       = $1A00             ; 2 x 65: ProDOS path of each panel before the list
 KDRVBUF     = COPYBUF           ; DRIVES result (12 x 32 bytes)
 KLISTBUF    = COPYBUF+$1000     ; scratch LIST before MOUNT
 
@@ -4764,7 +4770,7 @@ k_kparent:
         lda (ptr)
         cmp #KROOTLEN+1
         bcs :+
-        jmp main_key
+        jmp kleave
 :       tay
 @l:     lda (ptr),y
         cmp #'/'
@@ -4818,6 +4824,53 @@ k_kparent:
 @nx:    inc cnt
         bra @s
 @d:     jmp main_redraw
+
+; Esc at "KEGS:/": the panel shows again the ProDOS directory it had
+; before the images list was opened (the first volume, if that
+; directory is no longer there)
+kleave: ldx pn
+        stz pmode,x
+        jsr pathptr
+        jsr ksavptr
+        ldy #64
+:       lda (ptr2),y
+        sta (ptr),y
+        dey
+        bpl :-
+        lda ptr
+        sta gfipath
+        lda ptr+1
+        sta gfipath+1
+        MLICALL P_GETINFO, gfip
+        bcc :+
+        jsr scanvols
+        ldy vl
+        jsr setvol
+:       jsr loaddir
+        jmp main_redraw
+
+; remember path(pn) for kleave
+ksavepath:
+        jsr pathptr
+        jsr ksavptr
+        ldy #64
+:       lda (ptr),y
+        sta (ptr2),y
+        dey
+        bpl :-
+        rts
+
+; ptr2 = saved path of panel pn
+ksavptr:
+        lda #<KSAVE
+        sta ptr2
+        lda #>KSAVE
+        sta ptr2+1
+        lda pn
+        beq :+
+        lda #<(KSAVE+65)
+        sta ptr2
+:       rts
 
 ; KEGS's entry number of the cursor entry (minus the ".." row) -> A
 kapiidx:
@@ -5334,7 +5387,7 @@ s_kins:   .byte "Enter=Insert   Esc=Cancel", 0
 s_keject: .byte "Eject", 0
 s_kfrom:  .byte "from drive ", 0
 s_kin:    .byte " in ", 0
-s_kfoot:  .byte " Enter=Insert  8=Eject  Esc=Up ", 0
+s_kfoot:  .byte " Enter=Insert  8=Eject  Esc=Back ", 0
 s_kitem:  .byte " KEGS disk images...", 0
 s_notpd:  .byte "(not a ProDOS disk)", 0
 s_vfoot:  .byte " Enter=Select  B=Boot  Esc=Cancel ", 0
