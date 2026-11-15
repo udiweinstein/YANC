@@ -47,6 +47,8 @@ class Emu:
         self.refs = {}
         self.mlilog = []
         self.blockwrites = []
+        self.baddrives = {}                   # unit -> ON_LINE error (non-ProDOS disks)
+        self.booted = None                    # PC when a slot's boot firmware ($Cs00) is entered
 
     # ---------------- IO -----------------
     def io(self, a, v):
@@ -75,6 +77,9 @@ class Emu:
         while steps < maxsteps and not self.quit:
             if self.cpu.pc == 0xBF00:
                 self.mli()
+                continue
+            if 0xC100 <= self.cpu.pc <= 0xC700 and self.cpu.pc & 0xFF == 0:
+                self.booted = self.cpu.pc; self.quit = True
                 continue
             if self.mem.m[self.cpu.pc] == 0x42:     # WDM: 2-byte NOP on 65C02
                 if getattr(self, 'kegs', None) and self.mem.m[self.cpu.pc + 1] == 0xEA \
@@ -269,6 +274,9 @@ class Emu:
         for name, v in self.vols.items():
             self.wb(buf + o, v['unit'] | len(name))
             self.mem.m[buf + o + 1:buf + o + 1 + len(name)] = name.encode()
+            o += 16
+        for unit, err in self.baddrives.items():
+            self.wb(buf + o, unit & 0xF0); self.wb(buf + o + 1, err)
             o += 16
         self.wb(buf + o, 0)
         return 0
