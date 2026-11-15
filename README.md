@@ -20,6 +20,7 @@ The latest version is on the [Releases](https://github.com/udiweinstein/YANC/rel
 > Copy `YANC.SYSTEM` to a disk or hard drive that already boots ProDOS, then run it from there.
 
 ## What's new
+- **1.4** – `2` Vol also lists disks without ProDOS (games, DOS 3.3) and `B` boots the highlighted drive; `0` Quit goes to BASIC when `BASIC.SYSTEM` is there; Esc at the top of the KEGS disk images list returns to the directory shown before; Help shows the build date
 - **1.3** – in the [KEGS](https://github.com/udiweinstein/kegs) emulator: `2` → *KEGS disk images...* shows the host computer's disk images; Return inserts one into a drive, `8` ejects it
 - **1.2** – copy, move and delete extended (forked) GS/OS files; they are marked with `+`
 - **1.0** – first release
@@ -47,7 +48,7 @@ Alternatively, make `YANC.po` itself bootable by copying a `PRODOS` file onto it
 | A–Z | Jump to name |
 | Ctrl-R / Ctrl-S | Re-read disks / swap panels |
 | `1` Help | Key summary |
-| `2` Vol | Choose a volume (all online drives) |
+| `2` Vol | Choose a volume (all online drives) · `B` boots the highlighted drive |
 | `3` View | Text / hex viewer |
 | `4` Lock | `L` lock · `U` unlock · `B` make this `.SYSTEM` file boot first |
 | `5` Copy | Copy to the other panel (overwrite: Yes / No / All) |
@@ -55,16 +56,23 @@ Alternatively, make `YANC.po` itself bootable by copying a `PRODOS` file onto it
 | `7` Mkdir | Create directory |
 | `8` Delete | Delete (asks before deleting locked files) |
 | `9` Sort | Sort by name / type |
-| `0` Quit | Quit to ProDOS |
+| `0` Quit | Quit – to BASIC if `BASIC.SYSTEM` is in the directory YANC was started from, otherwise to ProDOS |
 
 Locked files are shown with `*` after the name, like `CATALOG`.
+
+### Booting another disk
+The `2` Vol box also lists drives holding a disk ProDOS can't read – games, DOS 3.3, copy-protected disks – as
+`(not a ProDOS disk)`. Press `B` on any row to boot that drive, just like `PR#6` would.
+Only drive 1 of a slot can be booted. (An empty 5.25" drive looks the same to ProDOS as an unreadable disk,
+so it is listed too.)
 
 ### KEGS disk images (only in the KEGS emulator)
 When YANC runs in [KEGS](https://github.com/udiweinstein/kegs), the `2` Vol box has one more line,
 *KEGS disk images...*. It turns the panel into a list of the disk images in KEGS's disk images folder
 (set in KEGS's F4 menu), with each image's size and the drive it is in.
 Return on a folder opens it; Return on an image offers only the drives that fit it (S6 for 5.25", S5 for 3.5",
-S7 for hard disks), inserts it and opens the disk in the panel. `8` ejects. The drive YANC itself runs from is never touched.
+S7 for hard disks), inserts it and opens the disk in the panel. `8` ejects. Esc at the top folder goes back to the directory the panel showed before.
+The drive YANC itself runs from is never touched.
 On a real Apple II nothing changes: YANC checks for KEGS with an instruction that a real 65C02 ignores.
 Copy keeps file type, aux type, access and dates. Directories are not copied recursively.
 

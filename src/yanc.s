@@ -5576,7 +5576,7 @@ eef:    .byte "This drive cannot be booted", 0
 
         .include "version.inc"         ; BUILD_DATE, written by build.sh
 helptab:
-        .word h1,h0,h2,h3,h4,h5,h6,h7,h0,h9,h10,h11,h11b,h12,h13,h14,h15,h16,h17
+        .word h1,h0,h2,h3,h4,h5,h6,h7,h9,h10,h11,h11b,h11c,h12,h13,h14,h15,h16,h17
         .word 0
 h0:     .byte 0
 h1:     .byte "YANC v1.4 ", BUILD_DATE, " - Yet Another Norton Commander for the Apple IIc", 0
@@ -5587,9 +5587,10 @@ h5:     .byte "Space        Tag / untag          A..Z           Jump to name", 0
 h6:     .byte "+  -  *      Tag all/none/invert  Ctrl-R         Re-read disks", 0
 h7:     .byte "Ctrl-S       Swap panels          2 > KEGS disk images (in KEGS)", 0
 h9:     .byte "1 Help       2 Choose volume      3 View (text / hex)  4 Lock", 0
-h10:    .byte "5 Copy       6 Rename / Move      7 Make directory", 0
-h11:    .byte "8 Delete     9 Sort name/type     0 Quit     * locked + forked", 0
+h10:    .byte "5 Copy       6 Rename / Move      7 Make directory  * locked  + forked", 0
+h11:    .byte "8 Delete     9 Sort name/type     0 Quit (to BASIC.SYSTEM if there)", 0
 h11b:   .byte "4 then B: make the .SYSTEM file under the cursor boot first", 0
+h11c:   .byte "2 then B: boot the highlighted drive (drive 1 of a slot)", 0
 h12:    .byte "Commands work on tagged files, or on the file under the cursor.", 0
 h13:    .byte "Copy / Move: to the directory shown in the other panel.", 0
 h14:    .byte "Rename: press 6 and type a new name (no '/').", 0

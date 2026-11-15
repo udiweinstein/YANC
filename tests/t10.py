@@ -143,4 +143,10 @@ e.meta[os.path.join(e.vols['SYSDISK']['path'], 'BASIC.SYSTEM')] = dict(type=0x04
 e.run(['0']); n0 = len(opens(e)); e.run(['y'])
 check(e.quit and len(opens(e)) == n0, 'a BASIC.SYSTEM that is not a SYS file is not run')
 
+# ---- 5. Help mentions the new keys
+e = emu(); e.run(['1'])
+check('2 then B: boot the highlighted drive (drive 1 of a slot)' in scr(e), 'help: boot from the volume box')
+check('0 Quit (to BASIC.SYSTEM if there)' in scr(e), 'help: quit goes to BASIC')
+check('1Help' in e.screen()[23] and 'via BASIC.SYSTEM' in scr(e), 'help box still fits above the key bar')
+
 print('FAILED:', fails or 'none')
