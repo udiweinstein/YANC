@@ -33,4 +33,51 @@ e = emu(); e.run(['1'])
 check(re.fullmatch(r'\d\d-[A-Z][a-z][a-z]-\d{4}', date) is not None, 'build date looks like 15-Nov-2026: %r' % date)
 check(('YANC v1.4 %s - Yet Another Norton Commander' % date) in e.screen()[3], 'help line 1: version and date')
 
+# ---- 2. Choose volume: non-ProDOS drives are listed, B boots the highlighted drive
+def sig(e, slot):
+    e.mem.m[0xC001 + slot*256] = 0x20; e.mem.m[0xC003 + slot*256] = 0x00; e.mem.m[0xC005 + slot*256] = 0x03
+def volbox(bad=None, kegs=False, sigs=(5, 6, 7)):
+    e = emu(kegs=kegs)
+    e.baddrives = dict(bad or {})
+    for s_ in sigs: sig(e, s_)
+    e.run(['2'])
+    return e
+FOOT = 'Enter=Select  B=Boot  Esc=Cancel'
+e = volbox({0x50: 0x52})
+s = scr(e)
+check('S5,D1  (not a ProDOS disk)' in s, 'non-ProDOS disk ($52) listed with its drive')
+check('S6,D1  /SYSDISK' in s and 'S7,D1  /HARD1' in s, 'ProDOS volumes still listed')
+check(FOOT in s, 'footer names the keys')
+e.run([DN, DN, DN, RET])
+check('Not a ProDOS disk - press B to boot it' in scr(e), 'Return on a non-ProDOS row: error')
+e.run([' '])
+check('Choose volume' not in scr(e) and e.booted is None, 'error closes the box, nothing booted')
+e = volbox({0x50: 0x27}); e.run([DN, DN, DN, 'b'])
+check(e.booted == 0xC500, 'B boots a copy-protected disk ($27) in S5,D1: %r' % (e.booted,))
+check(not e.store80, 'boot leaves 80STORE off')
+e = volbox(); e.run(['B'])
+check(e.booted == 0xC600, 'B on a ProDOS volume in S6,D1 boots slot 6: %r' % (e.booted,))
+e = volbox(); e.run([DN, DN, 'b'])
+check('Only drive 1 of a slot can be booted' in scr(e) and e.booted is None, 'B on drive 2: error')
+e = volbox({0x20: 0x52}); e.run([DN, DN, DN, 'b'])
+check('This drive cannot be booted' in scr(e) and e.booted is None, 'B on a slot without boot firmware: error')
+e = volbox({0xD0: 0x52}); e.run([DN, DN, DN, 'b'])
+check('Only drive 1' in scr(e) and e.booted is None, 'B on a non-ProDOS disk in drive 2: error')
+e = volbox({0x50: 0x28, 0x40: 0x2F})
+check('S5,D1' not in scr(e) and 'S4,D1' not in scr(e), 'empty / missing drives ($28, $2F) are not listed')
+e = volbox(kegs=True); e.run([DN, DN, DN, 'b'])
+check('Choose volume' in scr(e) and e.booted is None, 'B on the KEGS disk images row does nothing')
+e.run([RET])
+check('KEGS:/' in e.screen()[0], 'KEGS row still opens the images list')
+e = volbox({0x50: 0x52}, kegs=True); e.run([DN] * 4 + [RET])
+check('KEGS:/' in e.screen()[0], 'KEGS row comes after the non-ProDOS rows')
+many = {u: 0x52 for u in (0x10, 0x20, 0x40, 0x50, 0x90, 0xA0, 0xB0, 0xC0, 0xD0, 0xF0, 0x30)}
+e = volbox(many, kegs=True)
+L = e.screen()
+check(sum('(not a ProDOS disk)' in l for l in L) == 11 and any('KEGS disk images...' in l for l in L),
+      '14 drives + KEGS row all shown')
+check(any(FOOT in l for l in L[:23]) and '1Help' in L[23], 'full box: footer shown, key bar untouched')
+e.run([DN] * 14 + [RET])
+check('KEGS:/' in e.screen()[0], 'full box: last row reachable')
+
 print('FAILED:', fails or 'none')

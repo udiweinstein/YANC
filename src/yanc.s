@@ -98,6 +98,9 @@ ERR_KFOLDER = $E9
 ERR_KDST    = $EA
 ERR_KMOUNT  = $EB
 ERR_KPROT   = $EC
+ERR_NOTPD   = $ED
+ERR_BOOTD2  = $EE
+ERR_NOBOOT  = $EF
 
 ;--------------------------------------------------------------------
 ; Macros
@@ -262,6 +265,9 @@ pmode:  .res 2          ; per panel: 0 ProDOS, 1 KEGS disk images
 ksel:   .res 1
 knopt:  .res 1          ; number of drives in the insert box
 kopt:   .res 6          ; their DRIVES entry numbers
+vxn:    .res 1          ; drives with a non-ProDOS disk (after vl[vn-1])
+vtot:   .res 1          ; rows in the volume box (vn + vxn)
+vbt:    .res 1          ; its top line
 
 ;====================================================================
         .code
@@ -773,15 +779,26 @@ k_vol:  jsr scanvols
         jsr showerr
         jmp main_redraw
 :       stz vsel
+        clc
+        adc vxn
+        sta vtot                ; rows: volumes, then non-ProDOS drives
+        lda #4
+        ldx kegs
+        beq :+
+        ldx vtot
+        cpx #14                 ; full box + KEGS row: start one line higher
+        bcc :+
+        lda #3
+:       sta vbt
+        sta bt
         lda #20
         sta bl
         lda #59
         sta br
-        lda #4
-        sta bt
-        lda vn
+        lda vbt
         clc
-        adc #7
+        adc vtot
+        adc #3
         ldx kegs
         beq :+
         adc #2                  ; + "KEGS disk images..."
@@ -789,13 +806,19 @@ k_vol:  jsr scanvols
         lda #<t_vol
         ldy #>t_vol
         jsr box
+        ldx #23                 ; the keys, on the bottom border
+        ldy bb
+        jsr gotoxy
+        PRINT s_vfoot
 @draw:  ldx #0
-@e:     cpx vn
-        beq @kitem
-        phx
+@e:     cpx vtot
+        bne :+
+        jmp @kitem
+:       phx
         txa
         clc
-        adc #6
+        adc vbt
+        adc #2
         tay
         ldx #22
         jsr gotoxy
@@ -830,11 +853,16 @@ k_vol:  jsr scanvols
         lda #' '
         jsr putc
         jsr putc
-        lda #'/'
-        jsr putc
         lda onbuf,y
         and #$0F
-        sta tmp
+        bne @name
+        phx                     ; a disk ProDOS can't read
+        PRINT s_notpd
+        plx
+        bra @p
+@name:  sta tmp
+        lda #'/'
+        jsr putc
 @n:     lda onbuf+1,y
         jsr putc
         iny
@@ -848,18 +876,19 @@ k_vol:  jsr scanvols
         bra @p
 :       stz attr
         inx
-        bra @e
+        jmp @e
 @kitem: lda kegs
         beq @k
-        lda vn
+        lda vbt
         clc
-        adc #7
+        adc vtot
+        adc #3
         tay
         ldx #22
         jsr gotoxy
         stz attr
         lda vsel
-        cmp vn
+        cmp vtot
         bne :+
         lda #$80
         sta attr
@@ -882,12 +911,16 @@ k_vol:  jsr scanvols
         beq @up
         cmp #$0D
         beq @ch
+        cmp #'B'
+        beq @boot
+        cmp #'b'
+        beq @boot
         cmp #$1B
         bne @k
         jmp main_redraw
 @dn:    lda vsel
         inc a
-        cmp vn
+        cmp vtot
         bcc @dnok
         bne @k
         ldx kegs                ; one more row: KEGS disk images
@@ -898,22 +931,72 @@ k_vol:  jsr scanvols
         beq @k
         dec vsel
         jmp @draw
+@boot:  lda vsel
+        cmp vtot
+        bcs @k                  ; not on the KEGS row
+        jmp bootdrv
 @ch:    lda cp
         sta pn
         tax
         lda vsel
-        cmp vn
+        cmp vtot
         bne @chv
         lda #1                  ; KEGS disk images
         sta pmode,x
         jsr kroot
         jsr loaddir
         jmp main_redraw
-@chv:   stz pmode,x
+@chv:   cmp vn
+        bcc :+
+        lda #ERR_NOTPD          ; no ProDOS volume there to show
+        jsr showerr
+        jmp main_redraw
+:       stz pmode,x
         ldx vsel
         ldy vl,x
         jsr setvol
         jsr loaddir
+        jmp main_redraw
+
+; B in the volume box: boot the drive on row vsel.  Only drive 1 of a
+; slot can be booted, and only if the slot has disk boot firmware
+; ($Cs01=$20, $Cs03=$00, $Cs05=$03 - not there for drives ProDOS
+; remapped to another slot, or /RAM).
+bootdrv:
+        ldx vsel
+        ldy vl,x
+        lda onbuf,y
+        bpl :+
+        lda #ERR_BOOTD2
+        bra @err
+:       lsr a
+        lsr a
+        lsr a
+        lsr a
+        ora #$C0
+        sta ptr+1
+        sta bootj+2
+        stz ptr
+        ldy #1
+        lda (ptr),y
+        cmp #$20
+        bne @no
+        ldy #3
+        lda (ptr),y
+        bne @no
+        ldy #5
+        lda (ptr),y
+        cmp #$03
+        bne @no
+        stz closeref
+        MLICALL P_CLOSE, closep
+        jsr text40
+        lda $C082               ; ROM in, as the boot firmware expects
+        ldx #$FF
+        txs
+        jmp bootj
+@no:    lda #ERR_NOBOOT
+@err:   jsr showerr
         jmp main_redraw
 
 ;--------------------------------------------------------------------
@@ -2772,8 +2855,11 @@ launch: jsr pathptr                     ; prefix = directory of the file
         bpl :-
         lda lmode
         sta ldmode
-        ; back to a normal 40-column text screen
-        lda $37                         ; output hooked to 80-col firmware?
+        jsr text40
+        jmp ldstart
+
+; back to a normal 40-column text screen
+text40: lda $37                         ; output hooked to 80-col firmware?
         cmp #$C3
         bne :+
         lda #$95                        ; Ctrl-U: turn 80-col firmware off
@@ -2786,8 +2872,7 @@ launch: jsr pathptr                     ; prefix = directory of the file
         jsr $FB2F                       ; INIT
         jsr $FE93                       ; SETVID
         jsr $FE89                       ; SETKBD
-        jsr $FC58                       ; HOME
-        jmp ldstart
+        jmp $FC58                       ; HOME
 
 ;--------------------------------------------------------------------
 ; Loader: copied to $1000, loads a SYS file at $2000 and jumps to it
@@ -3083,13 +3168,14 @@ setvol: jsr pathptr
         bne @l
         rts
 
-; ON_LINE -> vl[] (offsets of valid entries), vn
+; ON_LINE -> vl[] (offsets of valid entries), vn; then vxn more
 scanvols:
         stz vn
+        stz vxn
         MLICALL P_ONLINE, onlinep
         ldy #0
 @l:     lda onbuf,y
-        beq @d
+        beq @x
         and #$0F
         beq @n
         ldx vn
@@ -3101,6 +3187,33 @@ scanvols:
         adc #16
         tay
         bne @l
+@x:     ; drives with a disk ProDOS can't read ($52 not ProDOS, $27 I/O
+        ; error: copy protected, or an empty 5.25" drive) go after the
+        ; volumes: vl[vn .. vn+vxn-1].  Only the volume box uses them.
+        ldy #0
+@l2:    lda onbuf,y
+        beq @d
+        and #$0F
+        bne @n2
+        lda onbuf+1,y
+        cmp #$52
+        beq @add
+        cmp #$27
+        bne @n2
+@add:   lda vn
+        clc
+        adc vxn
+        cmp #14
+        bcs @d
+        tax
+        tya
+        sta vl,x
+        inc vxn
+@n2:    tya
+        clc
+        adc #16
+        tay
+        bne @l2
 @d:     rts
 
 ; free / total blocks for panel pn
@@ -5223,6 +5336,8 @@ s_kfrom:  .byte "from drive ", 0
 s_kin:    .byte " in ", 0
 s_kfoot:  .byte " Enter=Insert  8=Eject  Esc=Up ", 0
 s_kitem:  .byte " KEGS disk images...", 0
+s_notpd:  .byte "(not a ProDOS disk)", 0
+s_vfoot:  .byte " Enter=Select  B=Boot  Esc=Cancel ", 0
 t_insert: .byte "Insert disk", 0
 t_eject:  .byte "Eject disk", 0
 
@@ -5346,6 +5461,12 @@ errtab: .byte $27
         .word eeb
         .byte ERR_KPROT
         .word eec
+        .byte ERR_NOTPD
+        .word eed
+        .byte ERR_BOOTD2
+        .word eee
+        .byte ERR_NOBOOT
+        .word eef
         .byte 0
 
 e27:    .byte "I/O error", 0
@@ -5383,6 +5504,9 @@ ee9:    .byte "KEGS disk images folder not found (F4)", 0
 eea:    .byte "Not possible: other panel is KEGS images", 0
 eeb:    .byte "KEGS could not insert that disk image", 0
 eec:    .byte "YANC is running from that drive", 0
+eed:    .byte "Not a ProDOS disk - press B to boot it", 0
+eee:    .byte "Only drive 1 of a slot can be booted", 0
+eef:    .byte "This drive cannot be booted", 0
 
         .include "version.inc"         ; BUILD_DATE, written by build.sh
 helptab:
@@ -5485,5 +5609,6 @@ crtp:     .byte 7               ; CREATE of a temporary file (path in inbuf)
           .word 0, 0
 tdesp:    .byte 1
           .word inbuf
+bootj:    jmp $C600             ; boot firmware of the chosen slot (patched)
 kname:    .res 28               ; KEGS: folder name to find after "up"
 kblk:     .res 68               ; KEGS call parameter block
